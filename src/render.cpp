@@ -5,7 +5,6 @@
 #include <algorithm>
 #include <cstdint>
 #include <memory>
-#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -247,16 +246,38 @@ std::string list_marker(const ListBlock& lb, size_t index)
     return std::to_string(lb.start_number + static_cast<int>(index)) + ".";
 }
 
+std::vector<std::string> code_split_lines(const std::string& text)
+{
+    std::vector<std::string> lines;
+    size_t pos = 0;
+    while (pos < text.size()) {
+        const size_t nl = text.find('\n', pos);
+        if (nl == std::string::npos) {
+            std::string line = text.substr(pos);
+            if (!line.empty() && line.back() == '\r') {
+                line.pop_back();
+            }
+            lines.push_back(std::move(line));
+            break;
+        }
+        std::string line = text.substr(pos, nl - pos);
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+        lines.push_back(std::move(line));
+        pos = nl + 1;
+    }
+    return lines;
+}
+
 template <class MeasureFn>
 std::vector<Line> code_lines(const std::string& text, double max_width_pt, double size_pt,
                              double leading, MeasureFn&& measure)
 {
     std::vector<Line> lines;
-    std::istringstream in(text);
-    std::string line;
-    while (std::getline(in, line)) {
+    for (const auto& raw : code_split_lines(text)) {
         std::vector<Token> tokens;
-        tokens.push_back({ line, InlineStyle::Code, false });
+        tokens.push_back({ raw, InlineStyle::Code, false });
         auto wrapped = wrap_tokens(tokens, max_width_pt, size_pt, leading, measure);
         lines.insert(lines.end(), wrapped.begin(), wrapped.end());
     }
@@ -408,23 +429,24 @@ bool render_markdown_to_pdf(const std::string& markdown,
             const double cell_pad = options.body_size_pt * 0.35;
             const double cell_size = options.body_size_pt * 0.95;
             const double col_width = content_width / static_cast<double>(column_count);
-            std::vector<double> row_heights;
-            row_heights.reserve(tb.rows.size());
-            for (const auto& row : tb.rows) {
+            const double inner_width = col_width - cell_pad * 2.0;
+            std::vector<std::vector<std::vector<Line>>> cell_lines(tb.rows.size());
+            std::vector<double> row_heights(tb.rows.size(), 0.0);
+            for (size_t r = 0; r < tb.rows.size(); ++r) {
+                cell_lines[r].resize(column_count);
+                const auto& row = tb.rows[r];
                 double row_height = 0.0;
                 for (size_t col = 0; col < column_count; ++col) {
                     const std::vector<InlineRun> empty;
                     const auto& runs = col < row.cells.size() ? row.cells[col].runs : empty;
-                    const auto lines = wrap_runs(runs, col_width - cell_pad * 2.0,
-                                                 cell_size, 1.22, measure);
-                    const double cell_height = total_height(lines) + cell_pad * 2.0;
+                    cell_lines[r][col] = wrap_runs(runs, inner_width, cell_size, 1.22, measure);
+                    const double cell_height = total_height(cell_lines[r][col]) + cell_pad * 2.0;
                     row_height = std::max(row_height, cell_height);
                 }
-                row_heights.push_back(row_height);
+                row_heights[r] = row_height;
             }
 
             auto draw_row = [&](size_t row_idx) {
-                const auto& row = tb.rows[row_idx];
                 const double row_height = row_heights[row_idx];
                 const bool header = tb.has_header && row_idx == 0;
                 if (header) {
@@ -436,10 +458,7 @@ bool render_markdown_to_pdf(const std::string& markdown,
                 double x = options.margin_left_pt;
                 for (size_t col = 0; col < column_count; ++col) {
                     writer.stroke_rect(x, cursor_y, col_width, row_height);
-                    const std::vector<InlineRun> empty;
-                    const auto& runs = col < row.cells.size() ? row.cells[col].runs : empty;
-                    const auto lines = wrap_runs(runs, col_width - cell_pad * 2.0,
-                                                 cell_size, 1.22, measure);
+                    const auto& lines = cell_lines[row_idx][col];
                     double cell_y = cursor_y + cell_pad;
                     for (const auto& line : lines) {
                         double text_x = x + cell_pad;

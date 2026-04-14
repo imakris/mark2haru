@@ -110,6 +110,57 @@ size_t find_closing_underscore(std::string_view s, size_t start, size_t delim_le
     return std::string::npos;
 }
 
+bool is_escapable(char c)
+{
+    return c == '\\' || c == '`' || c == '*' || c == '_' || c == '{' || c == '}'
+        || c == '[' || c == ']' || c == '(' || c == ')' || c == '#' || c == '+'
+        || c == '-' || c == '.' || c == '!' || c == '|' || c == '~';
+}
+
+size_t find_backtick_run(std::string_view s, size_t start, size_t run_len)
+{
+    size_t pos = start;
+    while (pos < s.size() && s[pos] != '\n') {
+        if (s[pos] != '`') {
+            ++pos;
+            continue;
+        }
+        const size_t run_start = pos;
+        while (pos < s.size() && s[pos] == '`') {
+            ++pos;
+        }
+        if (pos - run_start == run_len) {
+            return run_start;
+        }
+    }
+    return std::string::npos;
+}
+
+size_t find_link_close(std::string_view s, size_t open)
+{
+    int depth = 1;
+    size_t pos = open + 1;
+    while (pos < s.size()) {
+        const char c = s[pos];
+        if (c == '\n') {
+            return std::string::npos;
+        }
+        if (c == '\\' && pos + 1 < s.size() && is_escapable(s[pos + 1])) {
+            pos += 2;
+            continue;
+        }
+        if (c == '(') {
+            ++depth;
+        } else if (c == ')') {
+            if (--depth == 0) {
+                return pos;
+            }
+        }
+        ++pos;
+    }
+    return std::string::npos;
+}
+
 std::vector<InlineRun> parse_inline(const std::string& text)
 {
     std::vector<InlineRun> runs;
@@ -128,6 +179,12 @@ std::vector<InlineRun> parse_inline(const std::string& text)
     };
 
     while (i < text.size()) {
+        if (text[i] == '\\' && i + 1 < text.size() && is_escapable(text[i + 1])) {
+            current.push_back(text[i + 1]);
+            i += 2;
+            continue;
+        }
+
         if (starts_with(text, i, "***")) {
             const size_t close = find_asterisk_run(text, i + 3, 3);
             if (close != std::string::npos) {
@@ -189,11 +246,15 @@ std::vector<InlineRun> parse_inline(const std::string& text)
         }
 
         if (text[i] == '`') {
-            const size_t close = text.find('`', i + 1);
+            size_t run_len = 0;
+            while (i + run_len < text.size() && text[i + run_len] == '`') {
+                ++run_len;
+            }
+            const size_t close = find_backtick_run(text, i + run_len, run_len);
             if (close != std::string::npos) {
                 flush();
-                runs.push_back({ text.substr(i + 1, close - i - 1), InlineStyle::Code });
-                i = close + 1;
+                runs.push_back({ text.substr(i + run_len, close - i - run_len), InlineStyle::Code });
+                i = close + run_len;
                 continue;
             }
         }
@@ -201,7 +262,7 @@ std::vector<InlineRun> parse_inline(const std::string& text)
         if (text[i] == '[') {
             const size_t bracket_close = text.find("](", i + 1);
             if (bracket_close != std::string::npos) {
-                const size_t paren_close = text.find(')', bracket_close + 2);
+                const size_t paren_close = find_link_close(text, bracket_close + 1);
                 if (paren_close != std::string::npos) {
                     const std::string display = text.substr(i + 1, bracket_close - i - 1);
                     const std::string url = text.substr(bracket_close + 2,

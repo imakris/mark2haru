@@ -90,6 +90,15 @@ bool TrueTypeFont::load_from_file(const std::filesystem::path& path)
         return false;
     }
 
+    if (head->offset + 54 > file_bytes_.size()) {
+        file_bytes_.clear();
+        return false;
+    }
+    if (read_u32(file_bytes_, head->offset + 12) != 0x5F0F3CF5u) {
+        file_bytes_.clear();
+        return false;
+    }
+
     units_per_em_ = read_u16(file_bytes_, head->offset + 18);
     x_min_ = read_i16(file_bytes_, head->offset + 36);
     y_min_ = read_i16(file_bytes_, head->offset + 38);
@@ -215,6 +224,9 @@ std::uint16_t TrueTypeFont::lookup_cmap4(std::uint32_t codepoint) const
     const std::uint32_t start_codes = end_codes + seg_count * 2 + 2;
     const std::uint32_t id_deltas = start_codes + seg_count * 2;
     const std::uint32_t id_range_offsets = id_deltas + seg_count * 2;
+    if (id_range_offsets + static_cast<std::uint32_t>(seg_count) * 2 > file_bytes_.size()) {
+        return 0;
+    }
     for (std::uint16_t i = 0; i < seg_count; ++i) {
         const std::uint32_t end_code = read_u16(file_bytes_, end_codes + i * 2);
         const std::uint32_t start_code = read_u16(file_bytes_, start_codes + i * 2);
@@ -255,6 +267,9 @@ std::uint16_t TrueTypeFont::glyph_for_codepoint(std::uint32_t codepoint) const
     std::uint16_t gid = lookup_cmap12(codepoint);
     if (gid == 0) {
         gid = lookup_cmap4(codepoint);
+    }
+    if (glyph_cache_.size() >= 4096) {
+        glyph_cache_.clear();
     }
     glyph_cache_[codepoint] = gid;
     return gid;
