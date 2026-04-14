@@ -1,0 +1,10 @@
+^C:\PLMS\GALANTHUS\MARK2HARU\CMAKELISTS.TXT
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SC:/plms/galanthus/mark2haru -BC:/plms/galanthus/mark2haru/build-vs-cleanup --check-stamp-file C:/plms/galanthus/mark2haru/build-vs-cleanup/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

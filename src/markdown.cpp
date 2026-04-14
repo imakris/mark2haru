@@ -1,4 +1,4 @@
-#include "markdown.h"
+#include <mark2haru/markdown.h>
 
 #include <cctype>
 #include <cstdlib>

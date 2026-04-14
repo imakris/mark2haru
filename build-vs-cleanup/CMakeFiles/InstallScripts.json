@@ -1,0 +1,7 @@
+{
+	"InstallScripts" : 
+	[
+		"C:/plms/galanthus/mark2haru/build-vs-cleanup/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

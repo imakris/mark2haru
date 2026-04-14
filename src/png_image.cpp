@@ -1,4 +1,4 @@
-#include "png_image.h"
+#include <mark2haru/png_image.h>
 
 #include "miniz.h"
 

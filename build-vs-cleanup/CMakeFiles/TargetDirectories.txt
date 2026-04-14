@@ -1,0 +1,7 @@
+C:/plms/galanthus/mark2haru/build-vs-cleanup/CMakeFiles/mark2haru_core.dir
+C:/plms/galanthus/mark2haru/build-vs-cleanup/CMakeFiles/mark2haru.dir
+C:/plms/galanthus/mark2haru/build-vs-cleanup/CMakeFiles/test_png.dir
+C:/plms/galanthus/mark2haru/build-vs-cleanup/CMakeFiles/RUN_TESTS.dir
+C:/plms/galanthus/mark2haru/build-vs-cleanup/CMakeFiles/INSTALL.dir
+C:/plms/galanthus/mark2haru/build-vs-cleanup/CMakeFiles/ALL_BUILD.dir
+C:/plms/galanthus/mark2haru/build-vs-cleanup/CMakeFiles/ZERO_CHECK.dir
