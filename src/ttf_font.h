@@ -26,6 +26,9 @@ public:
     std::int16_t y_min() const { return y_min_; }
     std::int16_t x_max() const { return x_max_; }
     std::int16_t y_max() const { return y_max_; }
+    std::int16_t cap_height() const { return cap_height_; }
+    double italic_angle() const { return italic_angle_; }
+    bool is_fixed_pitch() const { return is_fixed_pitch_; }
 
     std::uint16_t glyph_for_codepoint(std::uint32_t codepoint) const;
     std::uint16_t advance_width_for_gid(std::uint16_t gid) const;
@@ -59,6 +62,9 @@ private:
     std::int16_t y_min_ = 0;
     std::int16_t x_max_ = 0;
     std::int16_t y_max_ = 0;
+    std::int16_t cap_height_ = 0;
+    double italic_angle_ = 0.0;
+    bool is_fixed_pitch_ = false;
     std::uint16_t num_glyphs_ = 0;
     std::uint16_t num_hmetrics_ = 0;
     std::vector<std::uint16_t> advance_widths_;
@@ -66,7 +72,6 @@ private:
     Cmap12 cmap12_;
     mutable std::unordered_map<std::uint32_t, std::uint16_t> glyph_cache_;
 
-    const TableRecord* find_table(const char tag[4]) const;
     std::uint16_t lookup_cmap4(std::uint32_t codepoint) const;
     std::uint16_t lookup_cmap12(std::uint32_t codepoint) const;
 };

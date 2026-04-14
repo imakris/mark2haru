@@ -45,30 +45,6 @@ std::uint32_t TrueTypeFont::read_u32(const std::vector<std::uint8_t>& data, std:
         | static_cast<std::uint32_t>(data[offset + 3]);
 }
 
-const TrueTypeFont::TableRecord* TrueTypeFont::find_table(const char tag[4]) const
-{
-    if (file_bytes_.size() < 12) {
-        return nullptr;
-    }
-    const std::uint16_t num_tables = read_u16(file_bytes_, 4);
-    std::uint32_t offset = 12;
-    for (std::uint16_t i = 0; i < num_tables; ++i, offset += 16) {
-        if (offset + 16 > file_bytes_.size()) {
-            break;
-        }
-        if (file_bytes_[offset + 0] == static_cast<std::uint8_t>(tag[0])
-            && file_bytes_[offset + 1] == static_cast<std::uint8_t>(tag[1])
-            && file_bytes_[offset + 2] == static_cast<std::uint8_t>(tag[2])
-            && file_bytes_[offset + 3] == static_cast<std::uint8_t>(tag[3])) {
-            static TableRecord record;
-            record.offset = read_u32(file_bytes_, offset + 8);
-            record.length = read_u32(file_bytes_, offset + 12);
-            return &record;
-        }
-    }
-    return nullptr;
-}
-
 bool TrueTypeFont::load_from_file(const std::filesystem::path& path)
 {
     source_path_ = path.string();
@@ -107,6 +83,8 @@ bool TrueTypeFont::load_from_file(const std::filesystem::path& path)
     const auto* maxp = get("maxp");
     const auto* hmtx = get("hmtx");
     const auto* cmap = get("cmap");
+    const auto* post = get("post");
+    const auto* os2 = get("OS/2");
     if (!head || !hhea || !maxp || !hmtx || !cmap) {
         file_bytes_.clear();
         return false;
@@ -122,6 +100,26 @@ bool TrueTypeFont::load_from_file(const std::filesystem::path& path)
     line_gap_ = read_i16(file_bytes_, hhea->offset + 8);
     num_hmetrics_ = read_u16(file_bytes_, hhea->offset + 34);
     num_glyphs_ = read_u16(file_bytes_, maxp->offset + 4);
+
+    if (post && post->offset + 16 <= file_bytes_.size()) {
+        // italicAngle: Fixed (16.16) signed
+        const std::int16_t angle_int = read_i16(file_bytes_, post->offset + 4);
+        const std::uint16_t angle_frac = read_u16(file_bytes_, post->offset + 6);
+        italic_angle_ = static_cast<double>(angle_int)
+            + static_cast<double>(angle_frac) / 65536.0;
+        // isFixedPitch: uint32, nonzero means monospaced
+        const std::uint32_t fixed_pitch = read_u32(file_bytes_, post->offset + 12);
+        is_fixed_pitch_ = fixed_pitch != 0;
+    }
+
+    // OS/2 table gives sCapHeight from version 2 onward (offset 88).
+    // For earlier versions we fall back to ascent at the caller site.
+    if (os2 && os2->offset + 90 <= file_bytes_.size()) {
+        const std::uint16_t version = read_u16(file_bytes_, os2->offset + 0);
+        if (version >= 2) {
+            cap_height_ = read_i16(file_bytes_, os2->offset + 88);
+        }
+    }
 
     advance_widths_.assign(num_glyphs_, 0);
     std::uint32_t pos = hmtx->offset;
