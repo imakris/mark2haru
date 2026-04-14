@@ -8,14 +8,9 @@
 namespace mark2haru {
 namespace {
 
-struct FontHeader {
-    std::uint16_t num_tables = 0;
-    std::uint16_t search_range = 0;
-    std::uint16_t entry_selector = 0;
-    std::uint16_t range_shift = 0;
-};
+namespace fs = std::filesystem;
 
-bool read_file_bytes(const std::filesystem::path& path, std::vector<std::uint8_t>& out)
+bool read_file_bytes(const fs::path& path, std::vector<std::uint8_t>& out)
 {
     std::ifstream in(path, std::ios::binary);
     if (!in) {
@@ -27,53 +22,53 @@ bool read_file_bytes(const std::filesystem::path& path, std::vector<std::uint8_t
 
 } // namespace
 
-std::uint16_t TrueTypeFont::read_u16(const std::vector<std::uint8_t>& data, std::uint32_t offset)
+std::uint16_t True_type_font::read_u16(const std::vector<std::uint8_t>& data, std::uint32_t offset)
 {
     return static_cast<std::uint16_t>((data[offset] << 8) | data[offset + 1]);
 }
 
-std::int16_t TrueTypeFont::read_i16(const std::vector<std::uint8_t>& data, std::uint32_t offset)
+std::int16_t True_type_font::read_i16(const std::vector<std::uint8_t>& data, std::uint32_t offset)
 {
     return static_cast<std::int16_t>(read_u16(data, offset));
 }
 
-std::uint32_t TrueTypeFont::read_u32(const std::vector<std::uint8_t>& data, std::uint32_t offset)
+std::uint32_t True_type_font::read_u32(const std::vector<std::uint8_t>& data, std::uint32_t offset)
 {
-    return (static_cast<std::uint32_t>(data[offset]) << 24)
-        | (static_cast<std::uint32_t>(data[offset + 1]) << 16)
-        | (static_cast<std::uint32_t>(data[offset + 2]) << 8)
-        | static_cast<std::uint32_t>(data[offset + 3]);
+    return (static_cast<std::uint32_t>(data[offset    ]) << 24)
+        | (static_cast<std::uint32_t>( data[offset + 1]) << 16)
+        | (static_cast<std::uint32_t>( data[offset + 2]) <<  8)
+        | static_cast<std::uint32_t>(  data[offset + 3]);
 }
 
-bool TrueTypeFont::load_from_file(const std::filesystem::path& path)
+bool True_type_font::load_from_file(const fs::path& path)
 {
-    source_path_ = path;
-    if (!read_file_bytes(path, file_bytes_)) {
-        file_bytes_.clear();
+    m_source_path = path;
+    if (!read_file_bytes(path, m_file_bytes)) {
+        m_file_bytes.clear();
         return false;
     }
 
-    if (file_bytes_.size() < 12) {
-        file_bytes_.clear();
+    if (m_file_bytes.size() < 12) {
+        m_file_bytes.clear();
         return false;
     }
 
-    const std::uint16_t num_tables = read_u16(file_bytes_, 4);
+    const std::uint16_t num_tables = read_u16(m_file_bytes, 4);
     std::uint32_t table_dir = 12;
-    std::unordered_map<std::string, TableRecord> tables;
+    std::unordered_map<std::string, table_record_t> tables;
     for (std::uint16_t i = 0; i < num_tables; ++i, table_dir += 16) {
-        if (table_dir + 16 > file_bytes_.size()) {
-            file_bytes_.clear();
+        if (table_dir + 16 > m_file_bytes.size()) {
+            m_file_bytes.clear();
             return false;
         }
-        std::string tag(reinterpret_cast<const char*>(&file_bytes_[table_dir]), 4);
+        std::string tag(reinterpret_cast<const char*>(&m_file_bytes[table_dir]), 4);
         tables[tag] = {
-            read_u32(file_bytes_, table_dir + 8),
-            read_u32(file_bytes_, table_dir + 12),
+            read_u32(m_file_bytes, table_dir + 8),
+            read_u32(m_file_bytes, table_dir + 12),
         };
     }
 
-    auto get = [&](const char* tag) -> const TableRecord* {
+    auto get = [&](const char* tag) -> const table_record_t* {
         auto it = tables.find(std::string(tag, 4));
         return it == tables.end() ? nullptr : &it->second;
     };
@@ -86,120 +81,123 @@ bool TrueTypeFont::load_from_file(const std::filesystem::path& path)
     const auto* post = get("post");
     const auto* os2 = get("OS/2");
     if (!head || !hhea || !maxp || !hmtx || !cmap) {
-        file_bytes_.clear();
+        m_file_bytes.clear();
         return false;
     }
 
-    if (head->offset + 54 > file_bytes_.size()) {
-        file_bytes_.clear();
+    if (head->offset + 54 > m_file_bytes.size()) {
+        m_file_bytes.clear();
         return false;
     }
-    if (read_u32(file_bytes_, head->offset + 12) != 0x5F0F3CF5u) {
-        file_bytes_.clear();
+    if (read_u32(m_file_bytes, head->offset + 12) != 0x5F0F3CF5u) {
+        m_file_bytes.clear();
         return false;
     }
 
-    units_per_em_ = read_u16(file_bytes_, head->offset + 18);
-    x_min_ = read_i16(file_bytes_, head->offset + 36);
-    y_min_ = read_i16(file_bytes_, head->offset + 38);
-    x_max_ = read_i16(file_bytes_, head->offset + 40);
-    y_max_ = read_i16(file_bytes_, head->offset + 42);
-    ascent_ = read_i16(file_bytes_, hhea->offset + 4);
-    descent_ = read_i16(file_bytes_, hhea->offset + 6);
-    line_gap_ = read_i16(file_bytes_, hhea->offset + 8);
-    num_hmetrics_ = read_u16(file_bytes_, hhea->offset + 34);
-    num_glyphs_ = read_u16(file_bytes_, maxp->offset + 4);
+    m_units_per_em = read_u16(m_file_bytes, head->offset + 18);
+    m_x_min        = read_i16(m_file_bytes, head->offset + 36);
+    m_y_min        = read_i16(m_file_bytes, head->offset + 38);
+    m_x_max        = read_i16(m_file_bytes, head->offset + 40);
+    m_y_max        = read_i16(m_file_bytes, head->offset + 42);
+    m_ascent       = read_i16(m_file_bytes, hhea->offset +  4);
+    m_descent      = read_i16(m_file_bytes, hhea->offset +  6);
+    m_line_gap     = read_i16(m_file_bytes, hhea->offset +  8);
+    m_num_hmetrics = read_u16(m_file_bytes, hhea->offset + 34);
+    m_num_glyphs   = read_u16(m_file_bytes, maxp->offset +  4);
 
-    if (post && post->offset + 16 <= file_bytes_.size()) {
+    if (post && post->offset + 16 <= m_file_bytes.size()) {
         // italicAngle: Fixed (16.16) signed
-        const std::int16_t angle_int = read_i16(file_bytes_, post->offset + 4);
-        const std::uint16_t angle_frac = read_u16(file_bytes_, post->offset + 6);
-        italic_angle_ = static_cast<double>(angle_int)
+        const std::int16_t angle_int = read_i16(m_file_bytes, post->offset + 4);
+        const std::uint16_t angle_frac = read_u16(m_file_bytes, post->offset + 6);
+        m_italic_angle = static_cast<double>(angle_int)
             + static_cast<double>(angle_frac) / 65536.0;
         // isFixedPitch: uint32, nonzero means monospaced
-        const std::uint32_t fixed_pitch = read_u32(file_bytes_, post->offset + 12);
-        is_fixed_pitch_ = fixed_pitch != 0;
+        const std::uint32_t fixed_pitch = read_u32(m_file_bytes, post->offset + 12);
+        m_is_fixed_pitch = fixed_pitch != 0;
     }
 
     // OS/2 table gives sCapHeight from version 2 onward (offset 88).
     // For earlier versions we fall back to ascent at the caller site.
-    if (os2 && os2->offset + 90 <= file_bytes_.size()) {
-        const std::uint16_t version = read_u16(file_bytes_, os2->offset + 0);
+    if (os2 && os2->offset + 90 <= m_file_bytes.size()) {
+        const std::uint16_t version = read_u16(m_file_bytes, os2->offset + 0);
         if (version >= 2) {
-            cap_height_ = read_i16(file_bytes_, os2->offset + 88);
+            m_cap_height = read_i16(m_file_bytes, os2->offset + 88);
         }
     }
 
-    advance_widths_.assign(num_glyphs_, 0);
+    m_advance_widths.assign(m_num_glyphs, 0);
     std::uint32_t pos = hmtx->offset;
     std::uint16_t last_advance = 0;
-    for (std::uint16_t gid = 0; gid < num_glyphs_; ++gid) {
-        if (gid < num_hmetrics_) {
-            if (pos + 4 > file_bytes_.size()) {
-                file_bytes_.clear();
+    for (std::uint16_t gid = 0; gid < m_num_glyphs; ++gid) {
+        if (gid < m_num_hmetrics) {
+            if (pos + 4 > m_file_bytes.size()) {
+                m_file_bytes.clear();
                 return false;
             }
-            last_advance = read_u16(file_bytes_, pos);
-            advance_widths_[gid] = last_advance;
+            last_advance = read_u16(m_file_bytes, pos);
+            m_advance_widths[gid] = last_advance;
             pos += 4;
-        } else {
-            advance_widths_[gid] = last_advance;
+        }
+        else {
+            m_advance_widths[gid] = last_advance;
         }
     }
 
-    cmap4_.offset = 0;
-    cmap12_.offset = 0;
-    const std::uint16_t sub_count = read_u16(file_bytes_, cmap->offset + 2);
+    m_cmap4.offset = 0;
+    m_cmap12.offset = 0;
+    const std::uint16_t sub_count = read_u16(m_file_bytes, cmap->offset + 2);
     std::uint32_t subtable = cmap->offset + 4;
     for (std::uint16_t i = 0; i < sub_count; ++i, subtable += 8) {
-        if (subtable + 8 > file_bytes_.size()) {
-            file_bytes_.clear();
+        if (subtable + 8 > m_file_bytes.size()) {
+            m_file_bytes.clear();
             return false;
         }
-        const std::uint16_t platform_id = read_u16(file_bytes_, subtable);
-        const std::uint32_t offset = read_u32(file_bytes_, subtable + 4);
+        const std::uint16_t platform_id = read_u16(m_file_bytes, subtable);
+        const std::uint32_t offset = read_u32(m_file_bytes, subtable + 4);
         const std::uint32_t table = cmap->offset + offset;
-        if (table + 2 > file_bytes_.size()) {
+        if (table + 2 > m_file_bytes.size()) {
             continue;
         }
-        const std::uint16_t format = read_u16(file_bytes_, table);
-        if (format == 12 && cmap12_.offset == 0) {
+        const std::uint16_t format = read_u16(m_file_bytes, table);
+        if (format == 12 && m_cmap12.offset == 0) {
             if (platform_id == 0 || platform_id == 3) {
-                cmap12_.offset = table;
+                m_cmap12.offset = table;
             }
-        } else if (format == 4 && cmap4_.offset == 0) {
+        }
+        else
+        if (format == 4 && m_cmap4.offset == 0) {
             if (platform_id == 0 || platform_id == 3) {
-                cmap4_.offset = table;
+                m_cmap4.offset = table;
             }
         }
     }
 
-    if (cmap12_.offset == 0 && cmap4_.offset == 0) {
-        file_bytes_.clear();
+    if (m_cmap12.offset == 0 && m_cmap4.offset == 0) {
+        m_file_bytes.clear();
         return false;
     }
 
-    glyph_cache_.clear();
+    m_glyph_cache.clear();
     return true;
 }
 
-std::uint16_t TrueTypeFont::lookup_cmap12(std::uint32_t codepoint) const
+std::uint16_t True_type_font::lookup_cmap12(std::uint32_t codepoint) const
 {
-    if (cmap12_.offset == 0) {
+    if (m_cmap12.offset == 0) {
         return 0;
     }
-    if (cmap12_.offset + 16 > file_bytes_.size()) {
+    if (m_cmap12.offset + 16 > m_file_bytes.size()) {
         return 0;
     }
-    const std::uint32_t n_groups = read_u32(file_bytes_, cmap12_.offset + 12);
-    std::uint32_t group = cmap12_.offset + 16;
+    const std::uint32_t n_groups = read_u32(m_file_bytes, m_cmap12.offset + 12);
+    std::uint32_t group = m_cmap12.offset + 16;
     for (std::uint32_t i = 0; i < n_groups; ++i, group += 12) {
-        if (group + 12 > file_bytes_.size()) {
+        if (group + 12 > m_file_bytes.size()) {
             break;
         }
-        const std::uint32_t start_char = read_u32(file_bytes_, group);
-        const std::uint32_t end_char = read_u32(file_bytes_, group + 4);
-        const std::uint32_t start_gid = read_u32(file_bytes_, group + 8);
+        const std::uint32_t start_char = read_u32(m_file_bytes, group);
+        const std::uint32_t end_char = read_u32(m_file_bytes, group + 4);
+        const std::uint32_t start_gid = read_u32(m_file_bytes, group + 8);
         if (codepoint < start_char) {
             break;
         }
@@ -210,28 +208,28 @@ std::uint16_t TrueTypeFont::lookup_cmap12(std::uint32_t codepoint) const
     return 0;
 }
 
-std::uint16_t TrueTypeFont::lookup_cmap4(std::uint32_t codepoint) const
+std::uint16_t True_type_font::lookup_cmap4(std::uint32_t codepoint) const
 {
-    if (cmap4_.offset == 0 || codepoint > 0xFFFF) {
+    if (m_cmap4.offset == 0 || codepoint > 0xFFFF) {
         return 0;
     }
-    if (cmap4_.offset + 16 > file_bytes_.size()) {
+    if (m_cmap4.offset + 16 > m_file_bytes.size()) {
         return 0;
     }
-    const std::uint16_t seg_count_x2 = read_u16(file_bytes_, cmap4_.offset + 6);
+    const std::uint16_t seg_count_x2 = read_u16(m_file_bytes, m_cmap4.offset + 6);
     const std::uint16_t seg_count = seg_count_x2 / 2;
-    const std::uint32_t end_codes = cmap4_.offset + 14;
+    const std::uint32_t end_codes = m_cmap4.offset + 14;
     const std::uint32_t start_codes = end_codes + seg_count * 2 + 2;
     const std::uint32_t id_deltas = start_codes + seg_count * 2;
     const std::uint32_t id_range_offsets = id_deltas + seg_count * 2;
-    if (id_range_offsets + static_cast<std::uint32_t>(seg_count) * 2 > file_bytes_.size()) {
+    if (id_range_offsets + static_cast<std::uint32_t>(seg_count) * 2 > m_file_bytes.size()) {
         return 0;
     }
     for (std::uint16_t i = 0; i < seg_count; ++i) {
-        const std::uint32_t end_code = read_u16(file_bytes_, end_codes + i * 2);
-        const std::uint32_t start_code = read_u16(file_bytes_, start_codes + i * 2);
-        const std::uint16_t delta = read_u16(file_bytes_, id_deltas + i * 2);
-        const std::uint16_t range_offset = read_u16(file_bytes_, id_range_offsets + i * 2);
+        const std::uint32_t end_code = read_u16(m_file_bytes, end_codes + i * 2);
+        const std::uint32_t start_code = read_u16(m_file_bytes, start_codes + i * 2);
+        const std::uint16_t delta = read_u16(m_file_bytes, id_deltas + i * 2);
+        const std::uint16_t range_offset = read_u16(m_file_bytes, id_range_offsets + i * 2);
 
         if (codepoint < start_code) {
             continue;
@@ -245,10 +243,10 @@ std::uint16_t TrueTypeFont::lookup_cmap4(std::uint32_t codepoint) const
 
         const std::uint32_t glyph_offset = id_range_offsets + i * 2
             + range_offset + (codepoint - start_code) * 2;
-        if (glyph_offset + 2 > file_bytes_.size()) {
+        if (glyph_offset + 2 > m_file_bytes.size()) {
             return 0;
         }
-        const std::uint16_t glyph = read_u16(file_bytes_, glyph_offset);
+        const std::uint16_t glyph = read_u16(m_file_bytes, glyph_offset);
         if (glyph == 0) {
             return 0;
         }
@@ -257,10 +255,10 @@ std::uint16_t TrueTypeFont::lookup_cmap4(std::uint32_t codepoint) const
     return 0;
 }
 
-std::uint16_t TrueTypeFont::glyph_for_codepoint(std::uint32_t codepoint) const
+std::uint16_t True_type_font::glyph_for_codepoint(std::uint32_t codepoint) const
 {
-    auto it = glyph_cache_.find(codepoint);
-    if (it != glyph_cache_.end()) {
+    auto it = m_glyph_cache.find(codepoint);
+    if (it != m_glyph_cache.end()) {
         return it->second;
     }
 
@@ -268,32 +266,32 @@ std::uint16_t TrueTypeFont::glyph_for_codepoint(std::uint32_t codepoint) const
     if (gid == 0) {
         gid = lookup_cmap4(codepoint);
     }
-    if (glyph_cache_.size() >= 4096) {
-        glyph_cache_.clear();
+    if (m_glyph_cache.size() >= 4096) {
+        m_glyph_cache.clear();
     }
-    glyph_cache_[codepoint] = gid;
+    m_glyph_cache[codepoint] = gid;
     return gid;
 }
 
-std::uint16_t TrueTypeFont::advance_width_for_gid(std::uint16_t gid) const
+std::uint16_t True_type_font::advance_width_for_gid(std::uint16_t gid) const
 {
-    if (advance_widths_.empty()) {
+    if (m_advance_widths.empty()) {
         return 0;
     }
-    if (gid < advance_widths_.size()) {
-        return advance_widths_[gid];
+    if (gid < m_advance_widths.size()) {
+        return m_advance_widths[gid];
     }
-    return advance_widths_.back();
+    return m_advance_widths.back();
 }
 
-double TrueTypeFont::advance_width_pt(std::uint32_t codepoint, double size_pt) const
+double True_type_font::advance_width_pt(std::uint32_t codepoint, double size_pt) const
 {
     const std::uint16_t gid = glyph_for_codepoint(codepoint);
     const std::uint16_t adv = advance_width_for_gid(gid);
-    if (units_per_em_ == 0) {
+    if (m_units_per_em == 0) {
         return 0.0;
     }
-    return static_cast<double>(adv) * size_pt / static_cast<double>(units_per_em_);
+    return static_cast<double>(adv) * size_pt / static_cast<double>(m_units_per_em);
 }
 
 } // namespace mark2haru

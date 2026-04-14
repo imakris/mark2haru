@@ -15,6 +15,8 @@
 
 namespace {
 
+namespace fs = std::filesystem;
+
 void write_u32_be(std::ofstream& out, std::uint32_t value)
 {
     const std::array<char, 4> bytes = {
@@ -40,23 +42,27 @@ bool compress_bytes(const std::vector<std::uint8_t>& raw, std::vector<std::uint8
 {
     mz_ulong compressed_len = compressBound(static_cast<uLong>(raw.size()));
     compressed.resize(static_cast<std::size_t>(compressed_len));
-    if (compress2(reinterpret_cast<Bytef*>(compressed.data()), &compressed_len,
-                  reinterpret_cast<const Bytef*>(raw.data()),
-                  static_cast<uLong>(raw.size()), Z_BEST_COMPRESSION) != Z_OK) {
+    if (compress2(
+            reinterpret_cast<Bytef*>(compressed.data()),
+            &compressed_len,
+            reinterpret_cast<const Bytef*>(raw.data()),
+            static_cast<uLong>(raw.size()),
+            Z_BEST_COMPRESSION) != Z_OK) {
         return false;
     }
     compressed.resize(static_cast<std::size_t>(compressed_len));
     return true;
 }
 
-bool write_png(const std::filesystem::path& path,
-               int width,
-               int height,
-               std::uint8_t bit_depth,
-               std::uint8_t color_type,
-               const std::vector<std::uint8_t>& raw_scanlines,
-               const std::vector<std::uint8_t>* palette = nullptr,
-               const std::vector<std::uint8_t>* trns = nullptr)
+bool write_png(
+    const fs::path& path,
+    int width,
+    int height,
+    std::uint8_t bit_depth,
+    std::uint8_t color_type,
+    const std::vector<std::uint8_t>& raw_scanlines,
+    const std::vector<std::uint8_t>* palette = nullptr,
+    const std::vector<std::uint8_t>* trns = nullptr)
 {
     std::vector<std::uint8_t> compressed;
     if (!compress_bytes(raw_scanlines, compressed)) {
@@ -99,7 +105,7 @@ bool write_png(const std::filesystem::path& path,
     return static_cast<bool>(out);
 }
 
-bool starts_with_pdf_header(const std::filesystem::path& path)
+bool starts_with_pdf_header(const fs::path& path)
 {
     std::ifstream in(path, std::ios::binary);
     if (!in) {
@@ -110,15 +116,16 @@ bool starts_with_pdf_header(const std::filesystem::path& path)
     return in.gcount() == 4 && header[0] == '%' && header[1] == 'P' && header[2] == 'D' && header[3] == 'F';
 }
 
-bool expect_png(const std::filesystem::path& path,
-                int width,
-                int height,
-                int color_components,
-                bool has_alpha,
-                const std::vector<std::uint8_t>& pixels,
-                const std::vector<std::uint8_t>& alpha)
+bool expect_png(
+    const fs::path& path,
+    int width,
+    int height,
+    int color_components,
+    bool has_alpha,
+    const std::vector<std::uint8_t>& pixels,
+    const std::vector<std::uint8_t>& alpha)
 {
-    mark2haru::PngImage image;
+    mark2haru::Png_image image;
     if (!image.load_from_file(path)) {
         std::cerr << "load failed: " << image.error() << "\n";
         return false;
@@ -158,9 +165,9 @@ int main(int argc, char** argv)
         return 2;
     }
 
-    const std::filesystem::path exe_dir = std::filesystem::path(argv[0]).parent_path();
-    const std::filesystem::path temp_dir = std::filesystem::temp_directory_path() / "mark2haru_png_test";
-    std::filesystem::create_directories(temp_dir);
+    const fs::path exe_dir  = fs::path(argv[0]).parent_path();
+    const fs::path temp_dir = fs::temp_directory_path() / "mark2haru_png_test";
+    fs::create_directories(temp_dir);
 
     const auto gray1_path = temp_dir / "gray1.png";
     const auto indexed_path = temp_dir / "indexed.png";
@@ -183,8 +190,9 @@ int main(int argc, char** argv)
         return 4;
     }
 
-    if (!write_png(rgba16_path, 1, 1, 16, 6,
-                   { 0x00, 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0 })) {
+    if (!write_png(
+            rgba16_path, 1, 1, 16, 6,
+            { 0x00, 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0 })) {
         std::cerr << "failed to write rgba16 png\n";
         return 5;
     }
@@ -199,20 +207,21 @@ int main(int argc, char** argv)
         return 8;
     }
 
-    auto metrics = std::make_shared<mark2haru::MeasurementContext>(
-        mark2haru::FontFamilyConfig::briefutil_default(), exe_dir);
+    auto metrics = std::make_shared<mark2haru::Measurement_context>(
+        mark2haru::font_family_config_t::briefutil_default(),
+        exe_dir);
     if (!metrics->loaded()) {
         std::cerr << metrics->error() << "\n";
         return 9;
     }
 
-    mark2haru::PngImage image;
+    mark2haru::Png_image image;
     if (!image.load_from_file(rgba16_path) || !image.loaded() || !image.has_alpha()) {
         std::cerr << "png load failed\n";
         return 10;
     }
 
-    mark2haru::PdfWriter writer(200.0, 200.0, metrics);
+    mark2haru::Pdf_writer writer(200.0, 200.0, metrics);
     if (!writer.fonts_loaded()) {
         std::cerr << writer.font_error() << "\n";
         return 11;

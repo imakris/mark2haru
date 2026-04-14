@@ -14,6 +14,8 @@
 namespace mark2haru {
 namespace {
 
+namespace fs = std::filesystem;
+
 template <class T>
 std::string number_to_string(T value)
 {
@@ -58,15 +60,21 @@ std::vector<std::uint32_t> decode_utf8(const std::string& text)
         size_t advance = 1;
         if (c < 0x80) {
             cp = c;
-        } else if ((c & 0xE0) == 0xC0 && i + 1 < text.size()) {
+        }
+        else
+        if ((c & 0xE0) == 0xC0 && i + 1 < text.size()) {
             cp = ((c & 0x1F) << 6) | (static_cast<unsigned char>(text[i + 1]) & 0x3F);
             advance = 2;
-        } else if ((c & 0xF0) == 0xE0 && i + 2 < text.size()) {
+        }
+        else
+        if ((c & 0xF0) == 0xE0 && i + 2 < text.size()) {
             cp = ((c & 0x0F) << 12)
                 | ((static_cast<unsigned char>(text[i + 1]) & 0x3F) << 6)
                 | (static_cast<unsigned char>(text[i + 2]) & 0x3F);
             advance = 3;
-        } else if ((c & 0xF8) == 0xF0 && i + 3 < text.size()) {
+        }
+        else
+        if ((c & 0xF8) == 0xF0 && i + 3 < text.size()) {
             cp = ((c & 0x07) << 18)
                 | ((static_cast<unsigned char>(text[i + 1]) & 0x3F) << 12)
                 | ((static_cast<unsigned char>(text[i + 2]) & 0x3F) << 6)
@@ -86,7 +94,8 @@ std::string utf16be_hex_from_codepoint(std::uint32_t codepoint)
         const std::uint16_t u = static_cast<std::uint16_t>(codepoint);
         out += hex_byte(static_cast<std::uint8_t>((u >> 8) & 0xFF));
         out += hex_byte(static_cast<std::uint8_t>(u & 0xFF));
-    } else {
+    }
+    else {
         const std::uint32_t cp = codepoint - 0x10000;
         const std::uint16_t high = static_cast<std::uint16_t>(0xD800 + (cp >> 10));
         const std::uint16_t low = static_cast<std::uint16_t>(0xDC00 + (cp & 0x3FF));
@@ -128,108 +137,121 @@ std::vector<std::uint16_t> sorted_used_glyphs(const std::unordered_set<std::uint
 
 } // namespace
 
-PdfWriter::PdfWriter(double page_width_pt, double page_height_pt,
-                     std::shared_ptr<const MeasurementContext> metrics)
-    : page_width_pt_(page_width_pt)
-    , page_height_pt_(page_height_pt)
-    , metrics_(std::move(metrics))
+Pdf_writer::Pdf_writer(
+    double page_width_pt,
+    double page_height_pt,
+    std::shared_ptr<const Measurement_context> metrics)
+:
+    m_page_width_pt(page_width_pt),
+    m_page_height_pt(page_height_pt),
+    m_metrics(std::move(metrics))
 {
     begin_page();
-    fonts_loaded_ = metrics_ && metrics_->loaded();
-    if (!fonts_loaded_) {
-        font_error_ = metrics_ ? metrics_->error() : "No measurement context";
+    m_fonts_loaded = m_metrics && m_metrics->loaded();
+    if (!m_fonts_loaded) {
+        m_font_error = m_metrics ? m_metrics->error() : "No measurement context";
     }
 }
 
-PdfWriter::PdfWriter(double page_width_pt, double page_height_pt,
-                     const std::filesystem::path& font_root)
-    : PdfWriter(page_width_pt, page_height_pt,
-                std::make_shared<MeasurementContext>(FontFamilyConfig::briefutil_default(), font_root))
+Pdf_writer::Pdf_writer(
+    double page_width_pt,
+    double page_height_pt,
+    const fs::path& font_root)
+:
+    Pdf_writer(
+        page_width_pt,
+        page_height_pt,
+        std::make_shared<Measurement_context>(
+            font_family_config_t::briefutil_default(),
+            font_root))
 {
 }
 
-bool PdfWriter::fonts_loaded() const
+bool Pdf_writer::fonts_loaded() const
 {
-    return fonts_loaded_;
+    return m_fonts_loaded;
 }
 
-std::string& PdfWriter::current_content()
+std::string& Pdf_writer::current_content()
 {
     return current_page().content;
 }
 
-PdfWriter::Page& PdfWriter::current_page()
+Pdf_writer::page_t& Pdf_writer::current_page()
 {
-    if (pages_.empty()) {
+    if (m_pages.empty()) {
         begin_page();
     }
-    return pages_.back();
+    return m_pages.back();
 }
 
-void PdfWriter::begin_page()
+void Pdf_writer::begin_page()
 {
-    pages_.push_back(Page{});
+    m_pages.push_back(page_t{});
 }
 
-void PdfWriter::set_stroke_color(const Color& c)
+void Pdf_writer::set_stroke_color(const color_t& color)
 {
-    stroke_ = c;
+    m_stroke = color;
 }
 
-void PdfWriter::set_fill_color(const Color& c)
+void Pdf_writer::set_fill_color(const color_t& color)
 {
-    fill_ = c;
+    m_fill = color;
 }
 
-void PdfWriter::set_line_width(double width_pt)
+void Pdf_writer::set_line_width(double width_pt)
 {
-    line_width_pt_ = width_pt;
+    m_line_width_pt = width_pt;
 }
 
-void PdfWriter::append_color(std::string& out, const Color& c, bool stroke) const
+void Pdf_writer::append_color(std::string& out, const color_t& color, bool stroke) const
 {
-    out += number_to_string(c.r);
+    out += number_to_string(color.r);
     out.push_back(' ');
-    out += number_to_string(c.g);
+    out += number_to_string(color.g);
     out.push_back(' ');
-    out += number_to_string(c.b);
+    out += number_to_string(color.b);
     out.push_back(' ');
     out += stroke ? "RG\n" : "rg\n";
 }
 
-std::string PdfWriter::font_resource_name(PdfFont font)
+std::string Pdf_writer::font_resource_name(Pdf_font font)
 {
     switch (font) {
-    case PdfFont::Regular: return "/F1";
-    case PdfFont::Bold: return "/F2";
-    case PdfFont::Italic: return "/F3";
-    case PdfFont::BoldItalic: return "/F4";
-    case PdfFont::Mono: return "/F5";
+        case Pdf_font::REGULAR:     return "/F1";
+        case Pdf_font::BOLD:        return "/F2";
+        case Pdf_font::ITALIC:      return "/F3";
+        case Pdf_font::BOLD_ITALIC: return "/F4";
+        case Pdf_font::MONO:        return "/F5";
+        default:                    return "/F1";
     }
-    return "/F1";
 }
 
-std::vector<PdfFont> PdfWriter::used_fonts(const std::array<LoadedFont, 5>& fonts)
+std::vector<Pdf_font> Pdf_writer::used_fonts(const std::array<loaded_font_t, 5>& fonts)
 {
-    std::vector<PdfFont> out;
-    for (size_t i = 0; i < fonts.size(); ++i) {
+    std::vector<Pdf_font> out;
+    for (std::size_t i = 0; i < fonts.size(); ++i) {
         if (!fonts[i].used_glyphs.empty()) {
-            out.push_back(static_cast<PdfFont>(i));
+            out.push_back(static_cast<Pdf_font>(i));
         }
     }
     return out;
 }
 
-std::string PdfWriter::encode_flate(const std::string& input)
+std::string Pdf_writer::encode_flate(const std::string& input)
 {
     if (input.empty()) {
         return {};
     }
     uLongf dest_len = compressBound(static_cast<uLong>(input.size()));
     std::string out(dest_len, '\0');
-    const int rc = compress2(reinterpret_cast<Bytef*>(&out[0]), &dest_len,
-                             reinterpret_cast<const Bytef*>(input.data()),
-                             static_cast<uLong>(input.size()), Z_BEST_COMPRESSION);
+    const int rc = compress2(
+        reinterpret_cast<Bytef*>(&out[0]),
+        &dest_len,
+        reinterpret_cast<const Bytef*>(input.data()),
+        static_cast<uLong>(input.size()),
+        Z_BEST_COMPRESSION);
     if (rc != Z_OK) {
         return input;
     }
@@ -237,22 +259,23 @@ std::string PdfWriter::encode_flate(const std::string& input)
     return out;
 }
 
-std::string PdfWriter::encode_flate(const std::vector<std::uint8_t>& input)
+std::string Pdf_writer::encode_flate(const std::vector<std::uint8_t>& input)
 {
     return encode_flate(std::string(reinterpret_cast<const char*>(input.data()), input.size()));
 }
 
-double PdfWriter::measure_text_width(PdfFont font, const std::string& text, double size_pt) const
+double Pdf_writer::measure_text_width(Pdf_font font, const std::string& text, double size_pt) const
 {
-    if (!metrics_) {
+    if (!m_metrics) {
         return 0.0;
     }
-    return metrics_->measure_text_width(font, text, size_pt);
+    return m_metrics->measure_text_width(font, text, size_pt);
 }
 
-std::string PdfWriter::utf8_to_hex_cid_string(const TrueTypeFont& font,
-                                              LoadedFont& loaded,
-                                              const std::string& text)
+std::string Pdf_writer::utf8_to_hex_cid_string(
+    const True_type_font& font,
+    loaded_font_t& loaded,
+    const std::string& text)
 {
     std::vector<std::uint16_t> gids;
     gids.reserve(text.size());
@@ -276,16 +299,20 @@ std::string PdfWriter::utf8_to_hex_cid_string(const TrueTypeFont& font,
     return pdf_hex_string(gids);
 }
 
-void PdfWriter::draw_text(double x_pt, double y_top_pt, double size_pt, PdfFont font,
-                          const std::string& text)
+void Pdf_writer::draw_text(
+    double x_pt,
+    double y_top_pt,
+    double size_pt,
+    Pdf_font font,
+    const std::string& text)
 {
-    if (!metrics_) {
+    if (!m_metrics) {
         return;
     }
 
-    auto& slot = fonts_[static_cast<std::size_t>(font)];
+    auto& slot = m_fonts[static_cast<std::size_t>(font)];
     slot.used = true;
-    const auto& face = metrics_->font_face(font);
+    const auto& face = m_metrics->font_face(font);
     const std::string encoded = utf8_to_hex_cid_string(face, slot, text);
     auto& out = current_content();
     out += "BT\n";
@@ -293,64 +320,70 @@ void PdfWriter::draw_text(double x_pt, double y_top_pt, double size_pt, PdfFont 
     out.push_back(' ');
     out += number_to_string(size_pt);
     out += " Tf\n";
-    out += number_to_string(x_pt) + " " + number_to_string(page_height_pt_ - y_top_pt - size_pt)
+    out += number_to_string(x_pt) + " " + number_to_string(m_page_height_pt - y_top_pt - size_pt)
         + " Td\n";
     out += encoded;
     out += " Tj\nET\n";
 }
 
-bool PdfWriter::draw_png(double x_pt, double y_top_pt, double w_pt, double h_pt, const PngImage& image)
+bool Pdf_writer::draw_png(double x_pt, double y_top_pt, double w_pt, double h_pt, const Png_image& image)
 {
     if (!image.loaded()) {
         return false;
     }
 
-    const std::size_t image_index = images_.size();
-    LoadedImage stored;
+    const std::size_t image_index = m_images.size();
+    loaded_image_t stored;
     stored.image = image;
     stored.resource_name = "/Im" + std::to_string(image_index + 1);
-    images_.push_back(std::move(stored));
+    m_images.push_back(std::move(stored));
     current_page().image_indices.push_back(image_index);
 
     auto& out = current_content();
     out += "q\n";
     out += number_to_string(w_pt) + " 0 0 " + number_to_string(h_pt) + " "
-        + number_to_string(x_pt) + " " + number_to_string(page_height_pt_ - y_top_pt - h_pt)
+        + number_to_string(x_pt) + " " + number_to_string(m_page_height_pt - y_top_pt - h_pt)
         + " cm\n";
-    out += images_.back().resource_name + " Do\nQ\n";
+    out += m_images.back().resource_name + " Do\nQ\n";
     return true;
 }
 
-bool PdfWriter::draw_png(double x_pt, double y_top_pt, double w_pt, double h_pt,
-                         const std::filesystem::path& path)
+bool Pdf_writer::draw_png(
+    double x_pt,
+    double y_top_pt,
+    double w_pt,
+    double h_pt,
+    const fs::path& path)
 {
-    PngImage image;
+    Png_image image;
     if (!image.load_from_file(path)) {
         return false;
     }
     return draw_png(x_pt, y_top_pt, w_pt, h_pt, image);
 }
 
-std::string PdfWriter::make_to_unicode_cmap(const LoadedFont& font)
+std::string Pdf_writer::make_to_unicode_cmap(const loaded_font_t& font)
 {
     std::ostringstream cmap;
     cmap << "/CIDInit /ProcSet findresource begin\n"
-         << "12 dict begin\n"
-         << "begincmap\n"
-         << "/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n"
-         << "/CMapName /Adobe-Identity-UCS def\n"
-         << "/CMapType 2 def\n"
-         << "1 begincodespacerange\n"
-         << "<0000> <FFFF>\n"
-         << "endcodespacerange\n";
+        << "12 dict begin\n"
+        << "begincmap\n"
+        << "/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n"
+        << "/CMapName /Adobe-Identity-UCS def\n"
+        << "/CMapType 2 def\n"
+        << "1 begincodespacerange\n"
+        << "<0000> <FFFF>\n"
+        << "endcodespacerange\n";
 
     std::vector<std::pair<std::uint16_t, std::uint32_t>> pairs;
     pairs.reserve(font.gid_to_unicode.size());
     for (const auto& kv : font.gid_to_unicode) {
         pairs.push_back(kv);
     }
-    std::sort(pairs.begin(), pairs.end(),
-              [](const auto& a, const auto& b) { return a.first < b.first; });
+    std::sort(
+        pairs.begin(),
+        pairs.end(),
+        [](const auto& a, const auto& b) { return a.first < b.first; });
 
     const std::size_t chunk = 64;
     for (std::size_t i = 0; i < pairs.size(); i += chunk) {
@@ -359,54 +392,54 @@ std::string PdfWriter::make_to_unicode_cmap(const LoadedFont& font)
         for (std::size_t j = 0; j < count; ++j) {
             const auto& [gid, cp] = pairs[i + j];
             cmap << '<' << hex_byte(static_cast<std::uint8_t>((gid >> 8) & 0xFF))
-                 << hex_byte(static_cast<std::uint8_t>(gid & 0xFF)) << "> <"
-                 << utf16be_hex_from_codepoint(cp) << ">\n";
+                << hex_byte(static_cast<std::uint8_t>(gid & 0xFF)) << "> <"
+                << utf16be_hex_from_codepoint(cp) << ">\n";
         }
         cmap << "endbfchar\n";
     }
 
     cmap << "endcmap\n"
-         << "CMapName currentdict /CMap defineresource pop\n"
-         << "end\n"
-         << "end";
+        << "CMapName currentdict /CMap defineresource pop\n"
+        << "end\n"
+        << "end";
     return cmap.str();
 }
 
-void PdfWriter::stroke_line(double x1_pt, double y1_top_pt, double x2_pt, double y2_top_pt)
+void Pdf_writer::stroke_line(double x1_pt, double y1_top_pt, double x2_pt, double y2_top_pt)
 {
     auto& out = current_content();
     out += "q\n";
-    append_color(out, stroke_, true);
-    out += number_to_string(line_width_pt_) + " w\n";
-    out += number_to_string(x1_pt) + " " + number_to_string(page_height_pt_ - y1_top_pt) + " m\n";
-    out += number_to_string(x2_pt) + " " + number_to_string(page_height_pt_ - y2_top_pt) + " l\nS\n";
+    append_color(out, m_stroke, true);
+    out += number_to_string(m_line_width_pt) + " w\n";
+    out += number_to_string(x1_pt) + " " + number_to_string(m_page_height_pt - y1_top_pt) + " m\n";
+    out += number_to_string(x2_pt) + " " + number_to_string(m_page_height_pt - y2_top_pt) + " l\nS\n";
     out += "Q\n";
 }
 
-void PdfWriter::stroke_rect(double x_pt, double y_top_pt, double w_pt, double h_pt)
+void Pdf_writer::stroke_rect(double x_pt, double y_top_pt, double w_pt, double h_pt)
 {
     auto& out = current_content();
     out += "q\n";
-    append_color(out, stroke_, true);
-    out += number_to_string(line_width_pt_) + " w\n";
-    out += number_to_string(x_pt) + " " + number_to_string(page_height_pt_ - y_top_pt - h_pt)
+    append_color(out, m_stroke, true);
+    out += number_to_string(m_line_width_pt) + " w\n";
+    out += number_to_string(x_pt) + " " + number_to_string(m_page_height_pt - y_top_pt - h_pt)
         + " " + number_to_string(w_pt) + " " + number_to_string(h_pt) + " re\nS\n";
     out += "Q\n";
 }
 
-void PdfWriter::fill_rect(double x_pt, double y_top_pt, double w_pt, double h_pt)
+void Pdf_writer::fill_rect(double x_pt, double y_top_pt, double w_pt, double h_pt)
 {
     auto& out = current_content();
     out += "q\n";
-    append_color(out, fill_, false);
-    out += number_to_string(x_pt) + " " + number_to_string(page_height_pt_ - y_top_pt - h_pt)
+    append_color(out, m_fill, false);
+    out += number_to_string(x_pt) + " " + number_to_string(m_page_height_pt - y_top_pt - h_pt)
         + " " + number_to_string(w_pt) + " " + number_to_string(h_pt) + " re\nf\n";
     out += "Q\n";
 }
 
-bool PdfWriter::save(const std::filesystem::path& path) const
+bool Pdf_writer::save(const fs::path& path) const
 {
-    if (!fonts_loaded_ || !metrics_) {
+    if (!m_fonts_loaded || !m_metrics) {
         return false;
     }
 
@@ -415,23 +448,23 @@ bool PdfWriter::save(const std::filesystem::path& path) const
         return false;
     }
 
-    const auto used_font_ids = used_fonts(fonts_);
+    const auto used_font_ids = used_fonts(m_fonts);
     const int font_count = static_cast<int>(used_font_ids.size());
-    const int page_count = static_cast<int>(pages_.size());
+    const int page_count = static_cast<int>(m_pages.size());
     const int catalog_obj = 1;
     const int pages_obj = 2;
     const int font_base_obj = 3;
     const int font_objects_per_face = 5;
 
-    struct ImageObjectNumbers {
+    struct image_object_numbers_t {
         int image_obj = 0;
         int mask_obj = 0;
     };
-    std::vector<ImageObjectNumbers> image_objects(images_.size());
+    std::vector<image_object_numbers_t> image_objects(m_images.size());
     int next_obj = font_base_obj + font_count * font_objects_per_face;
-    for (std::size_t i = 0; i < images_.size(); ++i) {
+    for (std::size_t i = 0; i < m_images.size(); ++i) {
         image_objects[i].image_obj = next_obj++;
-        if (images_[i].image.has_alpha()) {
+        if (m_images[i].image.has_alpha()) {
             image_objects[i].mask_obj = next_obj++;
         }
     }
@@ -452,9 +485,9 @@ bool PdfWriter::save(const std::filesystem::path& path) const
         + std::to_string(page_count) + " >>";
 
     for (int used_index = 0; used_index < font_count; ++used_index) {
-        const PdfFont font_id = used_font_ids[static_cast<std::size_t>(used_index)];
-        const auto& slot = fonts_[static_cast<std::size_t>(font_id)];
-        const auto& face = metrics_->font_face(font_id);
+        const Pdf_font font_id = used_font_ids[static_cast<std::size_t>(used_index)];
+        const auto& slot = m_fonts[static_cast<std::size_t>(font_id)];
+        const auto& face = m_metrics->font_face(font_id);
         const int type0_obj = font_base_obj + used_index * font_objects_per_face;
         const int file_obj = type0_obj + 1;
         const int desc_obj = type0_obj + 2;
@@ -486,8 +519,9 @@ bool PdfWriter::save(const std::filesystem::path& path) const
         if (default_width == 0) {
             default_width = static_cast<std::uint16_t>(face.units_per_em());
         }
-        const double default_width_1000 = scale_1000(static_cast<std::int16_t>(default_width),
-                                                     face.units_per_em());
+        const double default_width_1000 = scale_1000(
+            static_cast<std::int16_t>(default_width),
+            face.units_per_em());
         const double ascent = scale_1000(face.ascent(), face.units_per_em());
         const double descent = scale_1000(face.descent(), face.units_per_em());
         const double cap_height = face.cap_height() != 0
@@ -504,16 +538,16 @@ bool PdfWriter::save(const std::filesystem::path& path) const
         }
 
         std::ostringstream desc;
-        desc << "<< /Type /FontDescriptor /FontName /" << metrics_->font_tag_name(font_id)
-             << " /Flags " << flags
-             << " /Ascent " << number_to_string(ascent)
-             << " /Descent " << number_to_string(descent)
-             << " /CapHeight " << number_to_string(cap_height)
-             << " /ItalicAngle " << number_to_string(italic_angle)
-             << " /StemV 80 /FontBBox ["
-             << number_to_string(x_min) << ' ' << number_to_string(y_min) << ' '
-             << number_to_string(x_max) << ' ' << number_to_string(y_max)
-             << "] /FontFile2 " << file_obj << " 0 R >>";
+        desc << "<< /Type /FontDescriptor /FontName /" << m_metrics->font_tag_name(font_id)
+            << " /Flags " << flags
+            << " /Ascent " << number_to_string(ascent)
+            << " /Descent " << number_to_string(descent)
+            << " /CapHeight " << number_to_string(cap_height)
+            << " /ItalicAngle " << number_to_string(italic_angle)
+            << " /StemV 80 /FontBBox ["
+            << number_to_string(x_min) << ' ' << number_to_string(y_min) << ' '
+            << number_to_string(x_max) << ' ' << number_to_string(y_max)
+            << "] /FontFile2 " << file_obj << " 0 R >>";
         objects[desc_obj] = desc.str();
 
         std::ostringstream widths;
@@ -533,10 +567,10 @@ bool PdfWriter::save(const std::filesystem::path& path) const
         widths << "]";
 
         std::ostringstream cidfont;
-        cidfont << "<< /Type /Font /Subtype /CIDFontType2 /BaseFont /" << metrics_->font_tag_name(font_id)
-                << " /FontDescriptor " << desc_obj << " 0 R /CIDSystemInfo << /Registry (Adobe)"
-                << " /Ordering (Identity) /Supplement 0 >> /CIDToGIDMap /Identity /DW "
-                << number_to_string(default_width_1000) << " /W " << widths.str() << " >>";
+        cidfont << "<< /Type /Font /Subtype /CIDFontType2 /BaseFont /" << m_metrics->font_tag_name(font_id)
+            << " /FontDescriptor " << desc_obj << " 0 R /CIDSystemInfo << /Registry (Adobe)"
+            << " /Ordering (Identity) /Supplement 0 >> /CIDToGIDMap /Identity /DW "
+            << number_to_string(default_width_1000) << " /W " << widths.str() << " >>";
         objects[cid_obj] = cidfont.str();
 
         const std::string cmap = make_to_unicode_cmap(slot);
@@ -554,14 +588,14 @@ bool PdfWriter::save(const std::filesystem::path& path) const
         objects[unicode_obj] = cmap_stream.str();
 
         std::ostringstream type0_font;
-        type0_font << "<< /Type /Font /Subtype /Type0 /BaseFont /" << metrics_->font_tag_name(font_id)
-                   << " /Encoding /Identity-H /DescendantFonts [ " << cid_obj
-                   << " 0 R ] /ToUnicode " << unicode_obj << " 0 R >>";
+        type0_font << "<< /Type /Font /Subtype /Type0 /BaseFont /" << m_metrics->font_tag_name(font_id)
+            << " /Encoding /Identity-H /DescendantFonts [ " << cid_obj
+            << " 0 R ] /ToUnicode " << unicode_obj << " 0 R >>";
         objects[type0_obj] = type0_font.str();
     }
 
-    for (std::size_t i = 0; i < images_.size(); ++i) {
-        const auto& image = images_[i].image;
+    for (std::size_t i = 0; i < m_images.size(); ++i) {
+        const auto& image = m_images[i].image;
         const auto& numbers = image_objects[i];
         const std::vector<std::uint8_t>& data = image.pixels();
         const std::string compressed = encode_flate(data);
@@ -571,10 +605,11 @@ bool PdfWriter::save(const std::filesystem::path& path) const
             : std::string(reinterpret_cast<const char*>(data.data()), data.size());
 
         std::ostringstream image_stream;
-        image_stream << "<< /Type /XObject /Subtype /Image /Width " << image.width_px()
-                     << " /Height " << image.height_px()
-                     << " /ColorSpace " << (image.color_components() == 1 ? "/DeviceGray" : "/DeviceRGB")
-                     << " /BitsPerComponent 8";
+        image_stream
+            << "<< /Type /XObject /Subtype /Image /Width " << image.width_px()
+            << " /Height " << image.height_px() << " /ColorSpace "
+            << (image.color_components() == 1 ? "/DeviceGray" : "/DeviceRGB")
+            << " /BitsPerComponent 8";
         if (image.has_alpha()) {
             image_stream << " /SMask " << numbers.mask_obj << " 0 R";
         }
@@ -595,9 +630,10 @@ bool PdfWriter::save(const std::filesystem::path& path) const
                 ? alpha_compressed
                 : std::string(reinterpret_cast<const char*>(alpha.data()), alpha.size());
             std::ostringstream alpha_stream;
-            alpha_stream << "<< /Type /XObject /Subtype /Image /Width " << image.width_px()
-                         << " /Height " << image.height_px()
-                         << " /ColorSpace /DeviceGray /BitsPerComponent 8 /Length " << alpha_payload.size();
+            alpha_stream
+                << "<< /Type /XObject /Subtype /Image /Width " << image.width_px()
+                << " /Height " << image.height_px()
+                << " /ColorSpace /DeviceGray /BitsPerComponent 8 /Length " << alpha_payload.size();
             if (alpha_use_compressed) {
                 alpha_stream << " /Filter /FlateDecode";
             }
@@ -611,7 +647,7 @@ bool PdfWriter::save(const std::filesystem::path& path) const
     for (int i = 0; i < page_count; ++i) {
         const int content_obj = content_base_obj + i;
         const int page_obj = page_base_obj + i;
-        const Page& page = pages_[static_cast<std::size_t>(i)];
+        const page_t& page = m_pages[static_cast<std::size_t>(i)];
 
         const std::string content_compressed = encode_flate(page.content);
         const bool content_is_compressed = !content_compressed.empty() && content_compressed.size() < page.content.size();
@@ -629,17 +665,17 @@ bool PdfWriter::save(const std::filesystem::path& path) const
         std::ostringstream resources;
         resources << "<< /Font << ";
         for (int used_index = 0; used_index < font_count; ++used_index) {
-            const PdfFont font_id = used_font_ids[static_cast<std::size_t>(used_index)];
+            const Pdf_font font_id = used_font_ids[static_cast<std::size_t>(used_index)];
             resources << font_resource_name(font_id) << ' '
-                      << (font_base_obj + used_index * font_objects_per_face) << " 0 R ";
+                << (font_base_obj + used_index * font_objects_per_face) << " 0 R ";
         }
         resources << ">>";
 
         if (!page.image_indices.empty()) {
             resources << " /XObject << ";
             for (std::size_t image_index : page.image_indices) {
-                resources << images_[image_index].resource_name << ' '
-                          << image_objects[image_index].image_obj << " 0 R ";
+                resources << m_images[image_index].resource_name << ' '
+                    << image_objects[image_index].image_obj << " 0 R ";
             }
             resources << ">>";
         }
@@ -647,10 +683,10 @@ bool PdfWriter::save(const std::filesystem::path& path) const
 
         std::ostringstream page_obj_body;
         page_obj_body << "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 "
-                      << number_to_string(page_width_pt_) << ' '
-                      << number_to_string(page_height_pt_) << "] /Resources "
-                      << resources.str()
-                      << " /Contents " << content_obj << " 0 R >>";
+            << number_to_string(m_page_width_pt) << ' '
+            << number_to_string(m_page_height_pt) << "] /Resources "
+            << resources.str()
+            << " /Contents " << content_obj << " 0 R >>";
         objects[page_obj] = page_obj_body.str();
     }
 

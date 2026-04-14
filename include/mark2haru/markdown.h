@@ -6,61 +6,67 @@
 
 namespace mark2haru {
 
-enum class InlineStyle {
-    Normal,
-    Bold,
-    Italic,
-    BoldItalic,
-    Code,
+enum class Inline_style {
+    NORMAL,
+    BOLD,
+    ITALIC,
+    BOLD_ITALIC,
+    CODE,
 };
 
-struct InlineRun {
+struct inline_run_t {
     std::string text;
-    InlineStyle style = InlineStyle::Normal;
+    Inline_style style = Inline_style::NORMAL;
 };
 
-struct ParagraphBlock {
-    std::vector<InlineRun> runs;
+struct paragraph_block_t {
+    std::vector<inline_run_t> runs;
 };
 
-struct HeadingBlock {
+struct heading_block_t {
     int level = 1;
-    std::vector<InlineRun> runs;
+    std::vector<inline_run_t> runs;
 };
 
-struct ListItem {
-    std::vector<InlineRun> runs;
+struct list_item_t {
+    std::vector<inline_run_t> runs;
 };
 
-struct ListBlock {
+struct list_block_t {
     bool ordered = false;
     int start_number = 1;
-    std::vector<ListItem> items;
+    std::vector<list_item_t> items;
 };
 
-struct CodeBlock {
+struct code_block_t {
     std::string language;
     std::string text;
 };
 
-struct TableCell {
-    std::vector<InlineRun> runs;
+struct table_cell_t {
+    std::vector<inline_run_t> runs;
 };
 
-struct TableRow {
-    std::vector<TableCell> cells;
+struct table_row_t {
+    std::vector<table_cell_t> cells;
 };
 
-struct TableBlock {
-    std::vector<TableRow> rows;
+struct table_block_t {
+    std::vector<table_row_t> rows;
     bool has_header = false;
 };
 
-struct PageBreakBlock {
+struct page_break_block_t {
 };
 
-using Block = std::variant<ParagraphBlock, HeadingBlock, ListBlock, CodeBlock, TableBlock, PageBreakBlock>;
+using block_t = std::variant<
+    paragraph_block_t,
+    heading_block_t,
+    list_block_t,
+    code_block_t,
+    table_block_t,
+    page_break_block_t>;
 
-std::vector<Block> parse_markdown(const std::string& input);
+std::vector<block_t> parse_markdown(const std::string& input);
 
 } // namespace mark2haru

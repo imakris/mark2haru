@@ -7,29 +7,29 @@
 
 namespace mark2haru {
 
-class PngImage {
+class Png_image {
 public:
     bool load_from_file(const std::filesystem::path& path);
 
-    bool loaded() const { return loaded_; }
-    const std::string& error() const { return error_; }
+    bool loaded() const { return m_loaded; }
+    const std::string& error() const { return m_error; }
 
-    int width_px() const { return width_px_; }
-    int height_px() const { return height_px_; }
-    int color_components() const { return color_components_; }
-    bool has_alpha() const { return !alpha_.empty(); }
+    int width_px() const { return m_width_px; }
+    int height_px() const { return m_height_px; }
+    int color_components() const { return m_color_components; }
+    bool has_alpha() const { return !m_alpha.empty(); }
 
-    const std::vector<std::uint8_t>& pixels() const { return pixels_; }
-    const std::vector<std::uint8_t>& alpha() const { return alpha_; }
+    const std::vector<std::uint8_t>& pixels() const { return m_pixels; }
+    const std::vector<std::uint8_t>& alpha() const { return m_alpha; }
 
 private:
-    int width_px_ = 0;
-    int height_px_ = 0;
-    int color_components_ = 0;
-    bool loaded_ = false;
-    std::string error_;
-    std::vector<std::uint8_t> pixels_;
-    std::vector<std::uint8_t> alpha_;
+    int m_width_px = 0;
+    int m_height_px = 0;
+    int m_color_components = 0;
+    bool m_loaded = false;
+    std::string m_error;
+    std::vector<std::uint8_t> m_pixels;
+    std::vector<std::uint8_t> m_alpha;
 
     bool decode_png(const std::vector<std::uint8_t>& file_bytes);
 };

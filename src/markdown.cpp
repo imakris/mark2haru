@@ -151,7 +151,9 @@ size_t find_link_close(std::string_view s, size_t open)
         }
         if (c == '(') {
             ++depth;
-        } else if (c == ')') {
+        }
+        else
+        if (c == ')') {
             if (--depth == 0) {
                 return pos;
             }
@@ -161,13 +163,13 @@ size_t find_link_close(std::string_view s, size_t open)
     return std::string::npos;
 }
 
-std::vector<InlineRun> parse_inline(const std::string& text)
+std::vector<inline_run_t> parse_inline(const std::string& text)
 {
-    std::vector<InlineRun> runs;
+    std::vector<inline_run_t> runs;
     std::string current;
     size_t i = 0;
 
-    auto flush = [&](InlineStyle style = InlineStyle::Normal) {
+    auto flush = [&](Inline_style style = Inline_style::NORMAL) {
         if (!current.empty()) {
             runs.push_back({ current, style });
             current.clear();
@@ -189,7 +191,7 @@ std::vector<InlineRun> parse_inline(const std::string& text)
             const size_t close = find_asterisk_run(text, i + 3, 3);
             if (close != std::string::npos) {
                 flush();
-                runs.push_back({ text.substr(i + 3, close - i - 3), InlineStyle::BoldItalic });
+                runs.push_back({ text.substr(i + 3, close - i - 3), Inline_style::BOLD_ITALIC });
                 i = close + 3;
                 continue;
             }
@@ -199,7 +201,7 @@ std::vector<InlineRun> parse_inline(const std::string& text)
             const size_t close = find_asterisk_run(text, i + 2, 2);
             if (close != std::string::npos) {
                 flush();
-                runs.push_back({ text.substr(i + 2, close - i - 2), InlineStyle::Bold });
+                runs.push_back({ text.substr(i + 2, close - i - 2), Inline_style::BOLD });
                 i = close + 2;
                 continue;
             }
@@ -209,7 +211,7 @@ std::vector<InlineRun> parse_inline(const std::string& text)
             const size_t close = find_asterisk_run(text, i + 1, 1);
             if (close != std::string::npos) {
                 flush();
-                runs.push_back({ text.substr(i + 1, close - i - 1), InlineStyle::Italic });
+                runs.push_back({ text.substr(i + 1, close - i - 1), Inline_style::ITALIC });
                 i = close + 1;
                 continue;
             }
@@ -219,7 +221,7 @@ std::vector<InlineRun> parse_inline(const std::string& text)
             const size_t close = find_closing_underscore(text, i + 3, 3);
             if (close != std::string::npos) {
                 flush();
-                runs.push_back({ text.substr(i + 3, close - i - 3), InlineStyle::BoldItalic });
+                runs.push_back({ text.substr(i + 3, close - i - 3), Inline_style::BOLD_ITALIC });
                 i = close + 3;
                 continue;
             }
@@ -229,7 +231,7 @@ std::vector<InlineRun> parse_inline(const std::string& text)
             const size_t close = find_closing_underscore(text, i + 2, 2);
             if (close != std::string::npos) {
                 flush();
-                runs.push_back({ text.substr(i + 2, close - i - 2), InlineStyle::Bold });
+                runs.push_back({ text.substr(i + 2, close - i - 2), Inline_style::BOLD });
                 i = close + 2;
                 continue;
             }
@@ -239,7 +241,7 @@ std::vector<InlineRun> parse_inline(const std::string& text)
             const size_t close = find_closing_underscore(text, i + 1, 1);
             if (close != std::string::npos) {
                 flush();
-                runs.push_back({ text.substr(i + 1, close - i - 1), InlineStyle::Italic });
+                runs.push_back({ text.substr(i + 1, close - i - 1), Inline_style::ITALIC });
                 i = close + 1;
                 continue;
             }
@@ -253,7 +255,7 @@ std::vector<InlineRun> parse_inline(const std::string& text)
             const size_t close = find_backtick_run(text, i + run_len, run_len);
             if (close != std::string::npos) {
                 flush();
-                runs.push_back({ text.substr(i + run_len, close - i - run_len), InlineStyle::Code });
+                runs.push_back({ text.substr(i + run_len, close - i - run_len), Inline_style::CODE });
                 i = close + run_len;
                 continue;
             }
@@ -265,13 +267,17 @@ std::vector<InlineRun> parse_inline(const std::string& text)
                 const size_t paren_close = find_link_close(text, bracket_close + 1);
                 if (paren_close != std::string::npos) {
                     const std::string display = text.substr(i + 1, bracket_close - i - 1);
-                    const std::string url = text.substr(bracket_close + 2,
-                                                        paren_close - bracket_close - 2);
+                    const std::string url = text.substr(
+                        bracket_close + 2,
+                        paren_close - bracket_close - 2);
                     if (display.empty()) {
                         current += url;
-                    } else if (display == url) {
+                    }
+                    else
+                    if (display == url) {
                         current += display;
-                    } else {
+                    }
+                    else {
                         current += display;
                         current += " (";
                         current += url;
@@ -291,35 +297,35 @@ std::vector<InlineRun> parse_inline(const std::string& text)
     return runs;
 }
 
-struct ClassifiedLine {
+struct classified_line_t {
     enum class Type {
-        Empty,
-        Heading,
-        BulletItem,
-        OrderedItem,
-        TableRow,
-        TableSeparator,
-        PageBreak,
-        Text,
-    } type = Type::Text;
+        EMPTY,
+        HEADING,
+        BULLET_ITEM,
+        ORDERED_ITEM,
+        TABLE_ROW,
+        TABLE_SEPARATOR,
+        PAGE_BREAK,
+        TEXT,
+    } type = Type::TEXT;
     std::string content;
     int heading_level = 0;
     int list_number = 0;
 };
 
-ClassifiedLine classify_line(const std::string& line)
+classified_line_t classify_line(const std::string& line)
 {
     const std::string trimmed = trim(line);
     if (trimmed.empty()) {
-        return { ClassifiedLine::Type::Empty, {}, 0, 0 };
+        return { classified_line_t::Type::EMPTY, {}, 0, 0 };
     }
 
     if (trimmed == "<!-- pagebreak -->") {
-        return { ClassifiedLine::Type::PageBreak, {}, 0, 0 };
+        return { classified_line_t::Type::PAGE_BREAK, {}, 0, 0 };
     }
 
     if (trimmed.rfind("```", 0) == 0) {
-        return { ClassifiedLine::Type::Text, trimmed, 0, 0 };
+        return { classified_line_t::Type::TEXT, trimmed, 0, 0 };
     }
 
     if (trimmed.rfind('#', 0) == 0) {
@@ -328,14 +334,14 @@ ClassifiedLine classify_line(const std::string& line)
             ++level;
         }
         if (level > 0 && level < static_cast<int>(trimmed.size()) && trimmed[level] == ' ') {
-            return { ClassifiedLine::Type::Heading, trim(trimmed.substr(level + 1)), level, 0 };
+            return { classified_line_t::Type::HEADING, trim(trimmed.substr(level + 1)), level, 0 };
         }
     }
 
     if (trimmed.size() >= 2
         && (trimmed[0] == '-' || trimmed[0] == '*' || trimmed[0] == '+')
         && trimmed[1] == ' ') {
-        return { ClassifiedLine::Type::BulletItem, trim(trimmed.substr(2)), 0, 0 };
+        return { classified_line_t::Type::BULLET_ITEM, trim(trimmed.substr(2)), 0, 0 };
     }
 
     size_t pos = 0;
@@ -344,7 +350,7 @@ ClassifiedLine classify_line(const std::string& line)
     }
     if (pos > 0 && pos + 1 < trimmed.size() && trimmed[pos] == '.' && trimmed[pos + 1] == ' ') {
         return {
-            ClassifiedLine::Type::OrderedItem,
+            classified_line_t::Type::ORDERED_ITEM,
             trim(trimmed.substr(pos + 2)),
             0,
             std::atoi(trimmed.substr(0, pos).c_str())
@@ -360,14 +366,14 @@ ClassifiedLine classify_line(const std::string& line)
             }
         }
         return {
-            separator ? ClassifiedLine::Type::TableSeparator : ClassifiedLine::Type::TableRow,
+            separator ? classified_line_t::Type::TABLE_SEPARATOR : classified_line_t::Type::TABLE_ROW,
             trimmed,
             0,
             0
         };
     }
 
-    return { ClassifiedLine::Type::Text, rtrim(line), 0, 0 };
+    return { classified_line_t::Type::TEXT, rtrim(line), 0, 0 };
 }
 
 std::vector<std::string> split_table_cells(const std::string& row)
@@ -395,9 +401,9 @@ std::vector<std::string> split_table_cells(const std::string& row)
 
 } // namespace
 
-std::vector<Block> parse_markdown(const std::string& input)
+std::vector<block_t> parse_markdown(const std::string& input)
 {
-    std::vector<Block> blocks;
+    std::vector<block_t> blocks;
     const auto lines = split_lines(input);
     size_t i = 0;
     std::string paragraph_accum;
@@ -406,7 +412,7 @@ std::vector<Block> parse_markdown(const std::string& input)
         if (paragraph_accum.empty()) {
             return;
         }
-        ParagraphBlock pb;
+        paragraph_block_t pb;
         pb.runs = parse_inline(paragraph_accum);
         blocks.push_back(std::move(pb));
         paragraph_accum.clear();
@@ -417,7 +423,7 @@ std::vector<Block> parse_markdown(const std::string& input)
 
         if (trimmed.rfind("```", 0) == 0) {
             flush_paragraph();
-            CodeBlock code;
+            code_block_t code;
             code.language = trim(trimmed.substr(3));
             ++i;
             while (i < lines.size()) {
@@ -436,136 +442,137 @@ std::vector<Block> parse_markdown(const std::string& input)
             continue;
         }
 
-        const ClassifiedLine cl = classify_line(lines[i]);
+        const classified_line_t cl = classify_line(lines[i]);
 
         switch (cl.type) {
-        case ClassifiedLine::Type::Empty:
-            flush_paragraph();
-            ++i;
-            break;
+            case classified_line_t::Type::EMPTY:
+                flush_paragraph();
+                ++i;
+                break;
 
-        case ClassifiedLine::Type::Heading: {
-            flush_paragraph();
-            HeadingBlock hb;
-            hb.level = cl.heading_level;
-            hb.runs = parse_inline(cl.content);
-            blocks.push_back(std::move(hb));
-            ++i;
-            break;
-        }
-
-        case ClassifiedLine::Type::BulletItem:
-        case ClassifiedLine::Type::OrderedItem: {
-            flush_paragraph();
-            const bool ordered = cl.type == ClassifiedLine::Type::OrderedItem;
-            ListBlock lb;
-            lb.ordered = ordered;
-            lb.start_number = cl.list_number > 0 ? cl.list_number : 1;
-
-            std::string item_text;
-            bool item_open = false;
-            auto flush_item = [&]() {
-                if (!item_open) {
-                    return;
-                }
-                ListItem item;
-                item.runs = parse_inline(item_text);
-                lb.items.push_back(std::move(item));
-                item_text.clear();
-                item_open = false;
-            };
-
-            while (i < lines.size()) {
-                const ClassifiedLine item_line = classify_line(lines[i]);
-                const bool matching =
-                    (ordered && item_line.type == ClassifiedLine::Type::OrderedItem)
-                    || (!ordered && item_line.type == ClassifiedLine::Type::BulletItem);
-                if (matching) {
-                    flush_item();
-                    item_text = item_line.content;
-                    item_open = true;
-                    ++i;
-                    continue;
-                }
-
-                if (item_open && item_line.type == ClassifiedLine::Type::Text
-                    && !lines[i].empty()
-                    && (lines[i][0] == ' ' || lines[i][0] == '\t')) {
-                    if (!item_text.empty()) {
-                        item_text.push_back(' ');
-                    }
-                    item_text += item_line.content;
-                    ++i;
-                    continue;
-                }
-
+            case classified_line_t::Type::HEADING: {
+                flush_paragraph();
+                heading_block_t hb;
+                hb.level = cl.heading_level;
+                hb.runs = parse_inline(cl.content);
+                blocks.push_back(std::move(hb));
+                ++i;
                 break;
             }
 
-            flush_item();
-            blocks.push_back(std::move(lb));
-            break;
-        }
-
-        case ClassifiedLine::Type::TableRow: {
-            if (i + 1 < lines.size()
-                && classify_line(lines[i + 1]).type == ClassifiedLine::Type::TableSeparator) {
+            case classified_line_t::Type::BULLET_ITEM:
+            case classified_line_t::Type::ORDERED_ITEM: {
                 flush_paragraph();
-                TableBlock table;
+                const bool ordered = cl.type == classified_line_t::Type::ORDERED_ITEM;
+                list_block_t lb;
+                lb.ordered = ordered;
+                lb.start_number = cl.list_number > 0 ? cl.list_number : 1;
+
+                std::string item_text;
+                bool item_open = false;
+                auto flush_item = [&]() {
+                    if (!item_open) {
+                        return;
+                    }
+                    list_item_t item;
+                    item.runs = parse_inline(item_text);
+                    lb.items.push_back(std::move(item));
+                    item_text.clear();
+                    item_open = false;
+                };
+
                 while (i < lines.size()) {
-                    const ClassifiedLine row_line = classify_line(lines[i]);
-                    if (row_line.type == ClassifiedLine::Type::TableSeparator) {
-                        table.has_header = true;
+                    const classified_line_t item_line = classify_line(lines[i]);
+                    const bool matching =
+                        (ordered && item_line.type == classified_line_t::Type::ORDERED_ITEM)
+                        || (!ordered && item_line.type == classified_line_t::Type::BULLET_ITEM);
+                    if (matching) {
+                        flush_item();
+                        item_text = item_line.content;
+                        item_open = true;
                         ++i;
                         continue;
                     }
-                    if (row_line.type != ClassifiedLine::Type::TableRow) {
-                        break;
+
+                    if (item_open && item_line.type == classified_line_t::Type::TEXT
+                        && !lines[i].empty()
+                        && (lines[i][0] == ' ' || lines[i][0] == '\t')) {
+                        if (!item_text.empty()) {
+                            item_text.push_back(' ');
+                        }
+                        item_text += item_line.content;
+                        ++i;
+                        continue;
                     }
 
-                    TableRow row;
-                    const auto cells = split_table_cells(row_line.content);
-                    for (const auto& cell_text : cells) {
-                        TableCell cell;
-                        cell.runs = parse_inline(cell_text);
-                        row.cells.push_back(std::move(cell));
+                    break;
+                }
+
+                flush_item();
+                blocks.push_back(std::move(lb));
+                break;
+            }
+
+            case classified_line_t::Type::TABLE_ROW: {
+                if (i + 1 < lines.size()
+                    && classify_line(lines[i + 1]).type == classified_line_t::Type::TABLE_SEPARATOR) {
+                    flush_paragraph();
+                    table_block_t table;
+                    while (i < lines.size()) {
+                        const classified_line_t row_line = classify_line(lines[i]);
+                        if (row_line.type == classified_line_t::Type::TABLE_SEPARATOR) {
+                            table.has_header = true;
+                            ++i;
+                            continue;
+                        }
+                        if (row_line.type != classified_line_t::Type::TABLE_ROW) {
+                            break;
+                        }
+
+                        table_row_t row;
+                        const auto cells = split_table_cells(row_line.content);
+                        for (const auto& cell_text : cells) {
+                            table_cell_t cell;
+                            cell.runs = parse_inline(cell_text);
+                            row.cells.push_back(std::move(cell));
+                        }
+                        table.rows.push_back(std::move(row));
+                        ++i;
                     }
-                    table.rows.push_back(std::move(row));
+                    blocks.push_back(std::move(table));
+                }
+                else {
+                    if (!paragraph_accum.empty()) {
+                        paragraph_accum.push_back(' ');
+                    }
+                    paragraph_accum += cl.content;
                     ++i;
                 }
-                blocks.push_back(std::move(table));
-            } else {
+                break;
+            }
+
+            case classified_line_t::Type::TABLE_SEPARATOR:
                 if (!paragraph_accum.empty()) {
                     paragraph_accum.push_back(' ');
                 }
                 paragraph_accum += cl.content;
                 ++i;
-            }
-            break;
-        }
+                break;
 
-        case ClassifiedLine::Type::TableSeparator:
-            if (!paragraph_accum.empty()) {
-                paragraph_accum.push_back(' ');
-            }
-            paragraph_accum += cl.content;
-            ++i;
-            break;
+            case classified_line_t::Type::PAGE_BREAK:
+                flush_paragraph();
+                blocks.push_back(page_break_block_t{});
+                ++i;
+                break;
 
-        case ClassifiedLine::Type::PageBreak:
-            flush_paragraph();
-            blocks.push_back(PageBreakBlock{});
-            ++i;
-            break;
-
-        case ClassifiedLine::Type::Text:
-        default:
-            if (!paragraph_accum.empty()) {
-                paragraph_accum.push_back(' ');
-            }
-            paragraph_accum += cl.content;
-            ++i;
-            break;
+            case classified_line_t::Type::TEXT:
+            default:
+                if (!paragraph_accum.empty()) {
+                    paragraph_accum.push_back(' ');
+                }
+                paragraph_accum += cl.content;
+                ++i;
+                break;
         }
     }
 

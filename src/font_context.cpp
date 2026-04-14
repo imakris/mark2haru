@@ -9,6 +9,8 @@
 namespace mark2haru {
 namespace {
 
+namespace fs = std::filesystem;
+
 const std::array<std::vector<std::string>, 5>& candidate_sets()
 {
     static const std::array<std::vector<std::string>, 5> candidates = {{
@@ -21,13 +23,14 @@ const std::array<std::vector<std::string>, 5>& candidate_sets()
     return candidates;
 }
 
-bool try_dir(const std::filesystem::path& dir,
-             const std::vector<std::string>& candidates,
-             std::filesystem::path& out)
+bool try_dir(
+    const fs::path&                 dir,
+    const std::vector<std::string>& candidates,
+    fs::path&                       out)
 {
     for (const auto& candidate : candidates) {
         const auto p = dir / candidate;
-        if (std::filesystem::exists(p)) {
+        if (fs::exists(p)) {
             out = p;
             return true;
         }
@@ -35,17 +38,17 @@ bool try_dir(const std::filesystem::path& dir,
     return false;
 }
 
-std::vector<std::filesystem::path> search_roots(const std::filesystem::path& font_root)
+std::vector<fs::path> search_roots(const fs::path& font_root)
 {
-    std::vector<std::filesystem::path> roots;
+    std::vector<fs::path> roots;
     if (!font_root.empty()) {
         roots.push_back(font_root);
         roots.push_back(font_root / "fonts");
     }
-    roots.push_back(std::filesystem::current_path());
-    roots.push_back(std::filesystem::current_path() / "fonts");
+    roots.push_back(fs::current_path());
+    roots.push_back(fs::current_path() / "fonts");
 
-    const std::vector<std::filesystem::path> system_roots = {
+    const std::vector<fs::path> system_roots = {
         R"(C:\Windows\Fonts)",
         R"(C:\Windows\Fonts\truetype)",
         "/usr/share/fonts",
@@ -64,7 +67,7 @@ std::vector<std::filesystem::path> search_roots(const std::filesystem::path& fon
     char* home = nullptr;
     size_t home_len = 0;
     if (_dupenv_s(&home, &home_len, "HOME") == 0 && home != nullptr) {
-        const std::filesystem::path home_path(home);
+        const fs::path home_path(home);
         roots.push_back(home_path / ".fonts");
         roots.push_back(home_path / ".local/share/fonts");
         roots.push_back(home_path / "Library/Fonts");
@@ -72,7 +75,7 @@ std::vector<std::filesystem::path> search_roots(const std::filesystem::path& fon
     }
 #else
     if (const char* home = std::getenv("HOME")) {
-        const std::filesystem::path home_path(home);
+        const fs::path home_path(home);
         roots.push_back(home_path / ".fonts");
         roots.push_back(home_path / ".local/share/fonts");
         roots.push_back(home_path / "Library/Fonts");
@@ -84,66 +87,68 @@ std::vector<std::filesystem::path> search_roots(const std::filesystem::path& fon
 
 } // namespace
 
-FontFamilyConfig FontFamilyConfig::briefutil_default()
+font_family_config_t font_family_config_t::briefutil_default()
 {
-    FontFamilyConfig config;
-    config.regular = FontSource::from_base14("Helvetica");
-    config.bold = FontSource::from_base14("Helvetica-Bold");
-    config.italic = FontSource::from_base14("Helvetica-Oblique");
-    config.bold_italic = FontSource::from_base14("Helvetica-BoldOblique");
-    config.mono = FontSource::from_base14("Courier");
+    font_family_config_t config;
+    config.regular     = font_source_t::from_base14("Helvetica");
+    config.bold        = font_source_t::from_base14("Helvetica-Bold");
+    config.italic      = font_source_t::from_base14("Helvetica-Oblique");
+    config.bold_italic = font_source_t::from_base14("Helvetica-BoldOblique");
+    config.mono        = font_source_t::from_base14("Courier");
     return config;
 }
 
-FontSource MeasurementContext::slot_source(const FontFamilyConfig& family, PdfFont font)
+font_source_t Measurement_context::slot_source(const font_family_config_t& family, Pdf_font font)
 {
     switch (font) {
-    case PdfFont::Regular:
-        return family.regular.empty() ? FontSource::from_base14(default_base14_name(font)) : family.regular;
-    case PdfFont::Bold:
-        return family.bold.empty() ? FontSource::from_base14(default_base14_name(font)) : family.bold;
-    case PdfFont::Italic:
-        return family.italic.empty() ? FontSource::from_base14(default_base14_name(font)) : family.italic;
-    case PdfFont::BoldItalic:
-        return family.bold_italic.empty() ? FontSource::from_base14(default_base14_name(font)) : family.bold_italic;
-    case PdfFont::Mono:
-        return family.mono.empty() ? FontSource::from_base14(default_base14_name(font)) : family.mono;
+        case Pdf_font::REGULAR:
+            return family.regular.empty() ? font_source_t::from_base14(default_base14_name(font)) : family.regular;
+        case Pdf_font::BOLD:
+            return family.bold.empty() ? font_source_t::from_base14(default_base14_name(font)) : family.bold;
+        case Pdf_font::ITALIC:
+            return family.italic.empty() ? font_source_t::from_base14(default_base14_name(font)) : family.italic;
+        case Pdf_font::BOLD_ITALIC:
+            return family.bold_italic.empty() ? font_source_t::from_base14(default_base14_name(font)) : family.bold_italic;
+        case Pdf_font::MONO:
+            return family.mono.empty() ? font_source_t::from_base14(default_base14_name(font)) : family.mono;
+        default:
+            return font_source_t::from_base14(default_base14_name(Pdf_font::REGULAR));
     }
-    return FontSource::from_base14(default_base14_name(PdfFont::Regular));
 }
 
-std::string MeasurementContext::default_base14_name(PdfFont font)
+std::string Measurement_context::default_base14_name(Pdf_font font)
 {
     switch (font) {
-    case PdfFont::Regular: return "Helvetica";
-    case PdfFont::Bold: return "Helvetica-Bold";
-    case PdfFont::Italic: return "Helvetica-Oblique";
-    case PdfFont::BoldItalic: return "Helvetica-BoldOblique";
-    case PdfFont::Mono: return "Courier";
+        case Pdf_font::REGULAR:     return "Helvetica";
+        case Pdf_font::BOLD:        return "Helvetica-Bold";
+        case Pdf_font::ITALIC:      return "Helvetica-Oblique";
+        case Pdf_font::BOLD_ITALIC: return "Helvetica-BoldOblique";
+        case Pdf_font::MONO:        return "Courier";
+        default:                    return "Helvetica";
     }
-    return "Helvetica";
 }
 
-std::string MeasurementContext::slot_tag_name(PdfFont font)
+std::string Measurement_context::slot_tag_name(Pdf_font font)
 {
     switch (font) {
-    case PdfFont::Regular: return "MHRegular";
-    case PdfFont::Bold: return "MHBold";
-    case PdfFont::Italic: return "MHItalic";
-    case PdfFont::BoldItalic: return "MHBoldItalic";
-    case PdfFont::Mono: return "MHMono";
+        case Pdf_font::REGULAR:     return "MHRegular";
+        case Pdf_font::BOLD:        return "MHBold";
+        case Pdf_font::ITALIC:      return "MHItalic";
+        case Pdf_font::BOLD_ITALIC: return "MHBoldItalic";
+        case Pdf_font::MONO:        return "MHMono";
+        default:                    return "MHRegular";
     }
-    return "MHRegular";
 }
 
-std::filesystem::path MeasurementContext::resolve_font_path(const FontSource& source,
-                                                            const std::filesystem::path& font_root,
-                                                            PdfFont font)
+fs::path Measurement_context::resolve_font_path(
+    const font_source_t& source,
+    const fs::path& font_root,
+    Pdf_font font)
 {
     const auto& candidates = candidate_sets()[static_cast<std::size_t>(font)];
 
-    auto search_dir = [&](const std::filesystem::path& dir) -> std::filesystem::path {
-        std::filesystem::path out;
+    auto search_dir = [&](const fs::path& dir) -> fs::path {
+        fs::path out;
         if (try_dir(dir, candidates, out)) {
             return out;
         }
@@ -151,7 +156,7 @@ std::filesystem::path MeasurementContext::resolve_font_path(const FontSource& so
     };
 
     if (!source.path.empty()) {
-        if (std::filesystem::is_regular_file(source.path)) {
+        if (fs::is_regular_file(source.path)) {
             return source.path;
         }
         if (auto resolved = search_dir(source.path); !resolved.empty()) {
@@ -170,26 +175,28 @@ std::filesystem::path MeasurementContext::resolve_font_path(const FontSource& so
     return {};
 }
 
-MeasurementContext::MeasurementContext(const FontFamilyConfig& family, const std::filesystem::path& font_root)
+Measurement_context::Measurement_context(
+    const font_family_config_t& family,
+    const fs::path& font_root)
 {
-    for (size_t i = 0; i < slots_.size(); ++i) {
-        const PdfFont font = static_cast<PdfFont>(i);
-        const FontSource source = slot_source(family, font);
+    for (std::size_t i = 0; i < m_slots.size(); ++i) {
+        const Pdf_font font = static_cast<Pdf_font>(i);
+        const font_source_t source = slot_source(family, font);
         const auto path = resolve_font_path(source, font_root, font);
         if (path.empty()) {
-            error_ = "Unable to resolve font for " + default_base14_name(font);
+            m_error = "Unable to resolve font for " + default_base14_name(font);
             return;
         }
-        auto& slot = slots_[i];
+        auto& slot = m_slots[i];
         if (!slot.face.load_from_file(path)) {
-            error_ = "Unable to load font file for " + default_base14_name(font);
+            m_error = "Unable to load font file for " + default_base14_name(font);
             return;
         }
         slot.source_path = path;
         slot.tag_name = slot_tag_name(font);
     }
 
-    loaded_ = true;
+    m_loaded = true;
 }
 
 namespace {
@@ -198,21 +205,27 @@ std::vector<std::uint32_t> decode_utf8(const std::string& text)
 {
     std::vector<std::uint32_t> cps;
     cps.reserve(text.size());
-    for (size_t i = 0; i < text.size();) {
+    for (std::size_t i = 0; i < text.size();) {
         const unsigned char c = static_cast<unsigned char>(text[i]);
         std::uint32_t cp = '?';
-        size_t advance = 1;
+        std::size_t advance = 1;
         if (c < 0x80) {
             cp = c;
-        } else if ((c & 0xE0) == 0xC0 && i + 1 < text.size()) {
+        }
+        else
+        if ((c & 0xE0) == 0xC0 && i + 1 < text.size()) {
             cp = ((c & 0x1F) << 6) | (static_cast<unsigned char>(text[i + 1]) & 0x3F);
             advance = 2;
-        } else if ((c & 0xF0) == 0xE0 && i + 2 < text.size()) {
+        }
+        else
+        if ((c & 0xF0) == 0xE0 && i + 2 < text.size()) {
             cp = ((c & 0x0F) << 12)
                 | ((static_cast<unsigned char>(text[i + 1]) & 0x3F) << 6)
                 | (static_cast<unsigned char>(text[i + 2]) & 0x3F);
             advance = 3;
-        } else if ((c & 0xF8) == 0xF0 && i + 3 < text.size()) {
+        }
+        else
+        if ((c & 0xF8) == 0xF0 && i + 3 < text.size()) {
             cp = ((c & 0x07) << 18)
                 | ((static_cast<unsigned char>(text[i + 1]) & 0x3F) << 12)
                 | ((static_cast<unsigned char>(text[i + 2]) & 0x3F) << 6)
@@ -227,22 +240,22 @@ std::vector<std::uint32_t> decode_utf8(const std::string& text)
 
 } // namespace
 
-const TrueTypeFont& MeasurementContext::font_face(PdfFont font) const
+const True_type_font& Measurement_context::font_face(Pdf_font font) const
 {
-    return slots_[static_cast<std::size_t>(font)].face;
+    return m_slots[static_cast<std::size_t>(font)].face;
 }
 
-const std::filesystem::path& MeasurementContext::font_path(PdfFont font) const
+const fs::path& Measurement_context::font_path(Pdf_font font) const
 {
-    return slots_[static_cast<std::size_t>(font)].source_path;
+    return m_slots[static_cast<std::size_t>(font)].source_path;
 }
 
-const std::string& MeasurementContext::font_tag_name(PdfFont font) const
+const std::string& Measurement_context::font_tag_name(Pdf_font font) const
 {
-    return slots_[static_cast<std::size_t>(font)].tag_name;
+    return m_slots[static_cast<std::size_t>(font)].tag_name;
 }
 
-double MeasurementContext::measure_text_width(PdfFont font, const std::string& text, double size_pt) const
+double Measurement_context::measure_text_width(Pdf_font font, const std::string& text, double size_pt) const
 {
     const auto& face = font_face(font);
     double width_units = 0.0;

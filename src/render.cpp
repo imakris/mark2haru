@@ -12,6 +12,8 @@
 namespace mark2haru {
 namespace {
 
+namespace fs = std::filesystem;
+
 // Split a UTF-8 string into complete code-point units. Invalid bytes are
 // emitted as single-byte units so the rest of the string still makes it
 // through and the character-level wrap fallback does not slice a multi-byte
@@ -24,15 +26,11 @@ std::vector<std::string> utf8_pieces(const std::string& text)
     while (i < text.size()) {
         const unsigned char c = static_cast<unsigned char>(text[i]);
         size_t len = 1;
-        if ((c & 0x80) == 0x00) {
-            len = 1;
-        } else if ((c & 0xE0) == 0xC0) {
-            len = 2;
-        } else if ((c & 0xF0) == 0xE0) {
-            len = 3;
-        } else if ((c & 0xF8) == 0xF0) {
-            len = 4;
-        }
+        if ((c & 0x80) == 0x00) { len = 1; } else
+        if ((c & 0xE0) == 0xC0) { len = 2; } else
+        if ((c & 0xF0) == 0xE0) { len = 3; } else
+        if ((c & 0xF8) == 0xF0) { len = 4; }
+
         if (i + len > text.size()) {
             len = 1;
         }
@@ -42,33 +40,32 @@ std::vector<std::string> utf8_pieces(const std::string& text)
     return out;
 }
 
-PdfFont font_for(InlineStyle style)
+Pdf_font font_for(Inline_style style)
 {
     switch (style) {
-    case InlineStyle::Bold: return PdfFont::Bold;
-    case InlineStyle::Italic: return PdfFont::Italic;
-    case InlineStyle::BoldItalic: return PdfFont::BoldItalic;
-    case InlineStyle::Code: return PdfFont::Mono;
-    case InlineStyle::Normal:
-    default:
-        return PdfFont::Regular;
+        case Inline_style::BOLD:        return Pdf_font::BOLD;
+        case Inline_style::ITALIC:      return Pdf_font::ITALIC;
+        case Inline_style::BOLD_ITALIC: return Pdf_font::BOLD_ITALIC;
+        case Inline_style::CODE:        return Pdf_font::MONO;
+        case Inline_style::NORMAL:
+        default:                        return Pdf_font::REGULAR;
     }
 }
 
-struct Token {
+struct token_t {
     std::string text;
-    InlineStyle style = InlineStyle::Normal;
+    Inline_style style = Inline_style::NORMAL;
     bool newline = false;
 };
 
-struct Line {
-    std::vector<std::pair<std::string, InlineStyle>> spans;
+struct line_t {
+    std::vector<std::pair<std::string, Inline_style>> spans;
     double height_pt = 0.0;
 };
 
-std::vector<Token> tokenize_runs(const std::vector<InlineRun>& runs)
+std::vector<token_t> tokenize_runs(const std::vector<inline_run_t>& runs)
 {
-    std::vector<Token> tokens;
+    std::vector<token_t> tokens;
     for (const auto& run : runs) {
         size_t start = 0;
         while (start <= run.text.size()) {
@@ -104,24 +101,25 @@ std::vector<Token> tokenize_runs(const std::vector<InlineRun>& runs)
 }
 
 template <class MeasureFn>
-std::vector<Line> wrap_tokens(const std::vector<Token>& tokens,
-                              double max_width_pt,
-                              double size_pt,
-                              double leading,
-                              MeasureFn&& measure)
+std::vector<line_t> wrap_tokens(
+    const std::vector<token_t>& tokens,
+    double max_width_pt,
+    double size_pt,
+    double leading,
+    MeasureFn&& measure)
 {
-    std::vector<Line> lines;
-    Line current;
+    std::vector<line_t> lines;
+    line_t current;
     double current_width = 0.0;
 
     auto finish_line = [&]() {
         current.height_pt = size_pt * leading;
         lines.push_back(current);
-        current = Line{};
+        current = line_t{};
         current_width = 0.0;
     };
 
-    auto add_word = [&](const std::string& word, InlineStyle style) {
+    auto add_word = [&](const std::string& word, Inline_style style) {
         const double word_width = measure(font_for(style), word, size_pt);
         if (current_width > 0.0 && current_width + word_width > max_width_pt) {
             finish_line();
@@ -166,7 +164,9 @@ std::vector<Line> wrap_tokens(const std::vector<Token>& tokens,
             const double space_width = measure(font_for(token.style), token.text, size_pt);
             if (!current.spans.empty() && current_width + space_width > max_width_pt) {
                 finish_line();
-            } else if (!current.spans.empty()) {
+            }
+            else
+            if (!current.spans.empty()) {
                 current.spans.emplace_back(token.text, token.style);
                 current_width += space_width;
             }
@@ -184,16 +184,17 @@ std::vector<Line> wrap_tokens(const std::vector<Token>& tokens,
 }
 
 template <class MeasureFn>
-std::vector<Line> wrap_runs(const std::vector<InlineRun>& runs,
-                            double max_width_pt,
-                            double size_pt,
-                            double leading,
-                            MeasureFn&& measure)
+std::vector<line_t> wrap_runs(
+    const std::vector<inline_run_t>& runs,
+    double max_width_pt,
+    double size_pt,
+    double leading,
+    MeasureFn&& measure)
 {
     return wrap_tokens(tokenize_runs(runs), max_width_pt, size_pt, leading, measure);
 }
 
-double total_height(const std::vector<Line>& lines)
+double total_height(const std::vector<line_t>& lines)
 {
     double h = 0.0;
     for (const auto& line : lines) {
@@ -205,39 +206,39 @@ double total_height(const std::vector<Line>& lines)
 double heading_size(int level, double body_size)
 {
     switch (level) {
-    case 1: return body_size * 1.65;
-    case 2: return body_size * 1.35;
-    case 3: return body_size * 1.18;
-    case 4: return body_size * 1.08;
-    case 5: return body_size * 1.00;
-    case 6: return body_size * 0.92;
-    default: return body_size;
+        case 1:  return body_size * 1.65;
+        case 2:  return body_size * 1.35;
+        case 3:  return body_size * 1.18;
+        case 4:  return body_size * 1.08;
+        case 5:  return body_size * 1.00;
+        case 6:  return body_size * 0.92;
+        default: return body_size;
     }
 }
 
 double heading_spacing_before(int level, double body_size)
 {
     switch (level) {
-    case 1: return body_size * 0.95;
-    case 2: return body_size * 0.75;
-    case 3: return body_size * 0.60;
-    case 4: return body_size * 0.50;
-    default: return body_size * 0.45;
+        case 1:  return body_size * 0.95;
+        case 2:  return body_size * 0.75;
+        case 3:  return body_size * 0.60;
+        case 4:  return body_size * 0.50;
+        default: return body_size * 0.45;
     }
 }
 
 double heading_spacing_after(int level, double body_size)
 {
     switch (level) {
-    case 1: return body_size * 0.65;
-    case 2: return body_size * 0.55;
-    case 3: return body_size * 0.45;
-    case 4: return body_size * 0.40;
-    default: return body_size * 0.35;
+        case 1:  return body_size * 0.65;
+        case 2:  return body_size * 0.55;
+        case 3:  return body_size * 0.45;
+        case 4:  return body_size * 0.40;
+        default: return body_size * 0.35;
     }
 }
 
-std::string list_marker(const ListBlock& lb, size_t index)
+std::string list_marker(const list_block_t& lb, size_t index)
 {
     if (!lb.ordered) {
         // U+2022 BULLET
@@ -271,13 +272,17 @@ std::vector<std::string> code_split_lines(const std::string& text)
 }
 
 template <class MeasureFn>
-std::vector<Line> code_lines(const std::string& text, double max_width_pt, double size_pt,
-                             double leading, MeasureFn&& measure)
+std::vector<line_t> code_lines(
+    const std::string& text,
+    double max_width_pt,
+    double size_pt,
+    double leading,
+    MeasureFn&& measure)
 {
-    std::vector<Line> lines;
+    std::vector<line_t> lines;
     for (const auto& raw : code_split_lines(text)) {
-        std::vector<Token> tokens;
-        tokens.push_back({ raw, InlineStyle::Code, false });
+        std::vector<token_t> tokens;
+        tokens.push_back({ raw, Inline_style::CODE, false });
         auto wrapped = wrap_tokens(tokens, max_width_pt, size_pt, leading, measure);
         lines.insert(lines.end(), wrapped.begin(), wrapped.end());
     }
@@ -289,17 +294,18 @@ std::vector<Line> code_lines(const std::string& text, double max_width_pt, doubl
 
 } // namespace
 
-bool render_markdown_to_pdf(const std::string& markdown,
-                            const std::filesystem::path& output_path,
-                            const RenderOptions& options)
+bool render_markdown_to_pdf(
+    const std::string& markdown,
+    const fs::path& output_path,
+    const render_options_t& options)
 {
     const auto blocks = parse_markdown(markdown);
-    auto metrics = std::make_shared<MeasurementContext>(options.font_family, options.font_root_dir);
+    auto metrics = std::make_shared<Measurement_context>(options.font_family, options.font_root_dir);
     if (!metrics->loaded()) {
         return false;
     }
 
-    PdfWriter writer(options.page_width_pt, options.page_height_pt, metrics);
+    Pdf_writer writer(options.page_width_pt, options.page_height_pt, metrics);
     if (!writer.fonts_loaded()) {
         return false;
     }
@@ -322,22 +328,22 @@ bool render_markdown_to_pdf(const std::string& markdown,
         }
     };
 
-    auto measure = [&](PdfFont font, const std::string& text, double size_pt) {
+    auto measure = [&](Pdf_font font, const std::string& text, double size_pt) {
         return metrics->measure_text_width(font, text, size_pt);
     };
 
-    auto draw_line = [&](const Line& line, double size_pt, double x_pt) {
+    auto draw_line = [&](const line_t& line, double size_pt, double x_pt) {
         double x = x_pt;
         for (const auto& [text, style] : line.spans) {
-            const PdfFont font = font_for(style);
+            const Pdf_font font = font_for(style);
             writer.draw_text(x, cursor_y, size_pt, font, text);
             x += measure(font, text, size_pt);
         }
     };
 
     for (const auto& block : blocks) {
-        if (std::holds_alternative<ParagraphBlock>(block)) {
-            const auto& pb = std::get<ParagraphBlock>(block);
+        if (std::holds_alternative<paragraph_block_t>(block)) {
+            const auto& pb = std::get<paragraph_block_t>(block);
             const auto lines = wrap_runs(pb.runs, content_width, options.body_size_pt,
                                          options.line_spacing, measure);
             const double height = total_height(lines);
@@ -350,8 +356,8 @@ bool render_markdown_to_pdf(const std::string& markdown,
             continue;
         }
 
-        if (std::holds_alternative<HeadingBlock>(block)) {
-            const auto& hb = std::get<HeadingBlock>(block);
+        if (std::holds_alternative<heading_block_t>(block)) {
+            const auto& hb = std::get<heading_block_t>(block);
             const double size = heading_size(hb.level, options.body_size_pt);
             const auto lines = wrap_runs(hb.runs, content_width, size, 1.15, measure);
             const double height = total_height(lines);
@@ -365,11 +371,11 @@ bool render_markdown_to_pdf(const std::string& markdown,
             continue;
         }
 
-        if (std::holds_alternative<ListBlock>(block)) {
-            const auto& lb = std::get<ListBlock>(block);
+        if (std::holds_alternative<list_block_t>(block)) {
+            const auto& lb = std::get<list_block_t>(block);
             for (size_t i = 0; i < lb.items.size(); ++i) {
                 const std::string marker = list_marker(lb, i);
-                const double marker_width = measure(PdfFont::Regular, marker, options.body_size_pt);
+                const double marker_width = measure(Pdf_font::REGULAR, marker, options.body_size_pt);
                 const double gap = options.body_size_pt * 0.55;
                 const double item_left = options.margin_left_pt + marker_width + gap;
                 const double item_width = content_width - marker_width - gap;
@@ -377,8 +383,12 @@ bool render_markdown_to_pdf(const std::string& markdown,
                                              options.line_spacing, measure);
                 const double height = total_height(lines);
                 ensure_space(height + options.body_size_pt * 0.2);
-                writer.draw_text(options.margin_left_pt, cursor_y, options.body_size_pt,
-                                 PdfFont::Regular, marker);
+                writer.draw_text(
+                    options.margin_left_pt,
+                    cursor_y,
+                    options.body_size_pt,
+                    Pdf_font::REGULAR,
+                    marker);
                 for (const auto& line : lines) {
                     draw_line(line, options.body_size_pt, item_left);
                     cursor_y += line.height_pt;
@@ -389,8 +399,8 @@ bool render_markdown_to_pdf(const std::string& markdown,
             continue;
         }
 
-        if (std::holds_alternative<CodeBlock>(block)) {
-            const auto& cb = std::get<CodeBlock>(block);
+        if (std::holds_alternative<code_block_t>(block)) {
+            const auto& cb = std::get<code_block_t>(block);
             const double size = options.body_size_pt * 0.92;
             const double pad = options.body_size_pt * 0.45;
             const double available_width = content_width - pad * 2.0;
@@ -402,8 +412,8 @@ bool render_markdown_to_pdf(const std::string& markdown,
             for (const auto& line : lines) {
                 double x = options.margin_left_pt + pad;
                 for (const auto& [text, style] : line.spans) {
-                    writer.draw_text(x, y, size, PdfFont::Mono, text);
-                    x += measure(PdfFont::Mono, text, size);
+                    writer.draw_text(x, y, size, Pdf_font::MONO, text);
+                    x += measure(Pdf_font::MONO, text, size);
                 }
                 y += line.height_pt;
             }
@@ -412,8 +422,8 @@ bool render_markdown_to_pdf(const std::string& markdown,
             continue;
         }
 
-        if (std::holds_alternative<TableBlock>(block)) {
-            const auto& tb = std::get<TableBlock>(block);
+        if (std::holds_alternative<table_block_t>(block)) {
+            const auto& tb = std::get<table_block_t>(block);
             if (tb.rows.empty()) {
                 continue;
             }
@@ -430,14 +440,14 @@ bool render_markdown_to_pdf(const std::string& markdown,
             const double cell_size = options.body_size_pt * 0.95;
             const double col_width = content_width / static_cast<double>(column_count);
             const double inner_width = col_width - cell_pad * 2.0;
-            std::vector<std::vector<std::vector<Line>>> cell_lines(tb.rows.size());
+            std::vector<std::vector<std::vector<line_t>>> cell_lines(tb.rows.size());
             std::vector<double> row_heights(tb.rows.size(), 0.0);
             for (size_t r = 0; r < tb.rows.size(); ++r) {
                 cell_lines[r].resize(column_count);
                 const auto& row = tb.rows[r];
                 double row_height = 0.0;
                 for (size_t col = 0; col < column_count; ++col) {
-                    const std::vector<InlineRun> empty;
+                    const std::vector<inline_run_t> empty;
                     const auto& runs = col < row.cells.size() ? row.cells[col].runs : empty;
                     cell_lines[r][col] = wrap_runs(runs, inner_width, cell_size, 1.22, measure);
                     const double cell_height = total_height(cell_lines[r][col]) + cell_pad * 2.0;
@@ -463,7 +473,7 @@ bool render_markdown_to_pdf(const std::string& markdown,
                     for (const auto& line : lines) {
                         double text_x = x + cell_pad;
                         for (const auto& [text, style] : line.spans) {
-                            const PdfFont font = style == InlineStyle::Code ? PdfFont::Mono : font_for(style);
+                            const Pdf_font font = style == Inline_style::CODE ? Pdf_font::MONO : font_for(style);
                             writer.draw_text(text_x, cell_y, cell_size, font, text);
                             text_x += measure(font, text, cell_size);
                         }
@@ -485,7 +495,8 @@ bool render_markdown_to_pdf(const std::string& markdown,
                     + (body_start < tb.rows.size() ? row_heights[body_start] : 0.0);
                 ensure_space(min_fit);
                 draw_row(0);
-            } else {
+            }
+            else {
                 ensure_space(row_heights[0]);
             }
 
@@ -511,7 +522,7 @@ bool render_markdown_to_pdf(const std::string& markdown,
             continue;
         }
 
-        if (std::holds_alternative<PageBreakBlock>(block)) {
+        if (std::holds_alternative<page_break_block_t>(block)) {
             new_page();
             continue;
         }

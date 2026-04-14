@@ -8,12 +8,14 @@
 
 namespace {
 
+namespace fs = std::filesystem;
+
 void print_usage()
 {
     std::cerr << "Usage: mark2haru <input.md> <output.pdf>\n";
 }
 
-bool read_file(const std::filesystem::path& path, std::string& out)
+bool read_file(const fs::path& path, std::string& out)
 {
     std::ifstream in(path, std::ios::binary);
     if (!in) {
@@ -25,9 +27,10 @@ bool read_file(const std::filesystem::path& path, std::string& out)
     return true;
 }
 
-int run(const std::filesystem::path& exe_path,
-        const std::filesystem::path& input_path,
-        const std::filesystem::path& output_path)
+int run(
+    const fs::path& exe_path,
+    const fs::path& input_path,
+    const fs::path& output_path)
 {
     std::string markdown;
     if (!read_file(input_path, markdown)) {
@@ -35,7 +38,7 @@ int run(const std::filesystem::path& exe_path,
         return 2;
     }
 
-    mark2haru::RenderOptions options;
+    mark2haru::render_options_t options;
     options.font_root_dir = exe_path.parent_path();
 
     if (!mark2haru::render_markdown_to_pdf(markdown, output_path, options)) {
@@ -56,9 +59,10 @@ int wmain(int argc, wchar_t** argv)
         print_usage();
         return 1;
     }
-    return run(std::filesystem::path(argv[0]),
-               std::filesystem::path(argv[1]),
-               std::filesystem::path(argv[2]));
+    return run(
+        fs::path(argv[0]),
+        fs::path(argv[1]),
+        fs::path(argv[2]));
 }
 #else
 int main(int argc, char** argv)
@@ -68,8 +72,9 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    return run(std::filesystem::path(argv[0]),
-               std::filesystem::path(argv[1]),
-               std::filesystem::path(argv[2]));
+    return run(
+        fs::path(argv[0]),
+        fs::path(argv[1]),
+        fs::path(argv[2]));
 }
 #endif
