@@ -496,7 +496,8 @@ std::vector<block_t> parse_markdown(const std::string& input)
 
                     if (item_open && item_line.type == classified_line_t::Type::TEXT
                         && !lines[i].empty()
-                        && (lines[i][0] == ' ' || lines[i][0] == '\t')) {
+                        && (lines[i][0] == ' ' || lines[i][0] == '\t'))
+                    {
                         if (!item_text.empty()) {
                             item_text.push_back(' ');
                         }

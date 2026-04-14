@@ -47,7 +47,8 @@ bool compress_bytes(const std::vector<std::uint8_t>& raw, std::vector<std::uint8
             &compressed_len,
             reinterpret_cast<const Bytef*>(raw.data()),
             static_cast<uLong>(raw.size()),
-            Z_BEST_COMPRESSION) != Z_OK) {
+            Z_BEST_COMPRESSION) != Z_OK)
+    {
         return false;
     }
     compressed.resize(static_cast<std::size_t>(compressed_len));
@@ -192,7 +193,8 @@ int main(int argc, char** argv)
 
     if (!write_png(
             rgba16_path, 1, 1, 16, 6,
-            { 0x00, 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0 })) {
+            { 0x00, 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0 }))
+    {
         std::cerr << "failed to write rgba16 png\n";
         return 5;
     }

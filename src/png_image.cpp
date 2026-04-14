@@ -245,7 +245,8 @@ bool Png_image::decode_png(const std::vector<std::uint8_t>& file_bytes)
             reinterpret_cast<unsigned char*>(decoded.data()),
             &decoded_len,
             reinterpret_cast<const unsigned char*>(idat.data()),
-            &idat_len) != Z_OK) {
+            &idat_len) != Z_OK)
+    {
         m_error = "Failed to decompress PNG image data";
         return false;
     }
