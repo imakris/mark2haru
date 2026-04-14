@@ -12,9 +12,11 @@ add_executable(mark2haru
     src/pdf_writer.cpp
     src/render.cpp
     src/ttf_font.cpp
-    # miniz_zip.c is intentionally excluded — we only use compress2/compressBound
-    # from miniz.c (with deflate from miniz_tdef.c). The zip archive support
-    # pulls in a lot of unused code.
+    # We only use compress2/compressBound for PDF stream compression, so
+    # miniz_zip.c (archive format) is deliberately excluded. miniz_tinfl.c
+    # (inflate) is still linked because miniz.c's mz_inflate shim references
+    # tinfl_decompress unconditionally — removing it would require patching
+    # upstream. The tradeoff: ~35 KB of dead code kept for source cleanliness.
     third_party/miniz/miniz.c
     third_party/miniz/miniz_tdef.c
     third_party/miniz/miniz_tinfl.c

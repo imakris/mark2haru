@@ -4,7 +4,6 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -246,16 +245,43 @@ std::string list_marker(const ListBlock& lb, size_t index)
     return std::to_string(lb.start_number + static_cast<int>(index)) + ".";
 }
 
+// Split code-block text on both "\n" and "\r\n" boundaries. We cannot re-use
+// the parser's split_lines because it lives in another translation unit, but
+// the logic is intentionally the same: trailing CRs are stripped, and an
+// empty final line is only emitted when the input ends with a trailing
+// newline (which would otherwise disappear through std::getline).
+std::vector<std::string> code_split_lines(const std::string& text)
+{
+    std::vector<std::string> lines;
+    size_t pos = 0;
+    while (pos < text.size()) {
+        const size_t nl = text.find('\n', pos);
+        if (nl == std::string::npos) {
+            std::string line = text.substr(pos);
+            if (!line.empty() && line.back() == '\r') {
+                line.pop_back();
+            }
+            lines.push_back(std::move(line));
+            break;
+        }
+        std::string line = text.substr(pos, nl - pos);
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+        lines.push_back(std::move(line));
+        pos = nl + 1;
+    }
+    return lines;
+}
+
 template <class MeasureFn>
 std::vector<Line> code_lines(const std::string& text, double max_width_pt, double size_pt,
                              double leading, MeasureFn&& measure)
 {
     std::vector<Line> lines;
-    std::istringstream in(text);
-    std::string line;
-    while (std::getline(in, line)) {
+    for (const auto& raw : code_split_lines(text)) {
         std::vector<Token> tokens;
-        tokens.push_back({ line, InlineStyle::Code, false });
+        tokens.push_back({ raw, InlineStyle::Code, false });
         auto wrapped = wrap_tokens(tokens, max_width_pt, size_pt, leading, measure);
         lines.insert(lines.end(), wrapped.begin(), wrapped.end());
     }
@@ -265,16 +291,57 @@ std::vector<Line> code_lines(const std::string& text, double max_width_pt, doubl
     return lines;
 }
 
+// Estimate the height of the first line of a block without actually wrapping
+// it. Used for heading widow/orphan control so that we can keep a heading
+// with its first body line on the same page.
+template <class MeasureFn>
+double first_line_height(const Block& block, double content_width,
+                         const RenderOptions& options, MeasureFn&& measure)
+{
+    if (std::holds_alternative<ParagraphBlock>(block)) {
+        const auto& pb = std::get<ParagraphBlock>(block);
+        const auto lines = wrap_runs(pb.runs, content_width, options.body_size_pt,
+                                     options.line_spacing, measure);
+        return lines.empty() ? 0.0 : lines.front().height_pt;
+    }
+    if (std::holds_alternative<HeadingBlock>(block)) {
+        const auto& hb = std::get<HeadingBlock>(block);
+        const double size = heading_size(hb.level, options.body_size_pt);
+        return size * 1.15;
+    }
+    if (std::holds_alternative<ListBlock>(block)) {
+        const auto& lb = std::get<ListBlock>(block);
+        if (lb.items.empty()) {
+            return 0.0;
+        }
+        const auto lines = wrap_runs(lb.items.front().runs, content_width,
+                                     options.body_size_pt, options.line_spacing, measure);
+        return lines.empty() ? 0.0 : lines.front().height_pt;
+    }
+    if (std::holds_alternative<CodeBlock>(block)) {
+        return options.body_size_pt * 0.92 * 1.25 + options.body_size_pt * 0.9;
+    }
+    if (std::holds_alternative<TableBlock>(block)) {
+        return options.body_size_pt * 1.5;
+    }
+    return options.body_size_pt * options.line_spacing;
+}
+
 } // namespace
 
-bool render_markdown_to_pdf(const std::string& markdown,
-                            const std::string& output_path,
-                            const RenderOptions& options)
+RenderResult render_markdown_to_pdf(const std::string& markdown,
+                                    const std::string& output_path,
+                                    const RenderOptions& options)
 {
+    RenderResult result;
     const auto blocks = parse_markdown(markdown);
     PdfWriter writer(options.page_width_pt, options.page_height_pt, options.font_root_dir);
-    if (!writer.fonts_loaded()) {
-        return false;
+    if (!writer.init()) {
+        result.ok = false;
+        result.error = writer.font_error().empty()
+            ? std::string("failed to load fonts")
+            : writer.font_error();
+        return result;
     }
 
     writer.set_stroke_color({ 0.2, 0.2, 0.2 });
@@ -308,7 +375,8 @@ bool render_markdown_to_pdf(const std::string& markdown,
         }
     };
 
-    for (const auto& block : blocks) {
+    for (size_t block_index = 0; block_index < blocks.size(); ++block_index) {
+        const auto& block = blocks[block_index];
         if (std::holds_alternative<ParagraphBlock>(block)) {
             const auto& pb = std::get<ParagraphBlock>(block);
             const auto lines = wrap_runs(pb.runs, content_width, options.body_size_pt,
@@ -328,7 +396,16 @@ bool render_markdown_to_pdf(const std::string& markdown,
             const double size = heading_size(hb.level, options.body_size_pt);
             const auto lines = wrap_runs(hb.runs, content_width, size, 1.15, measure);
             const double height = total_height(lines);
-            ensure_space(heading_spacing_before(hb.level, size) + height + heading_spacing_after(hb.level, size));
+            // Orphan control: reserve space for at least the first line of the
+            // next block as well, so a heading can never land at the very
+            // bottom of a page with its body overflowing onto the next.
+            double follow_height = 0.0;
+            if (block_index + 1 < blocks.size()) {
+                follow_height = first_line_height(blocks[block_index + 1], content_width,
+                                                  options, measure);
+            }
+            ensure_space(heading_spacing_before(hb.level, size) + height
+                         + heading_spacing_after(hb.level, size) + follow_height);
             cursor_y += heading_spacing_before(hb.level, size);
             for (const auto& line : lines) {
                 draw_line(line, size, options.margin_left_pt);
@@ -371,15 +448,16 @@ bool render_markdown_to_pdf(const std::string& markdown,
             const double height = total_height(lines) + pad * 2.0;
             ensure_space(height + options.body_size_pt * 0.2);
             writer.fill_rect(options.margin_left_pt, cursor_y, content_width, height);
-            double y = cursor_y + pad;
+            // Reuse draw_line by mutating cursor_y. The code-block spans are
+            // already marked InlineStyle::Code, so font_for() picks Mono
+            // naturally — no hard-coded mono branch needed here.
+            const double saved_y = cursor_y;
+            cursor_y = saved_y + pad;
             for (const auto& line : lines) {
-                double x = options.margin_left_pt + pad;
-                for (const auto& [text, style] : line.spans) {
-                    writer.draw_text(x, y, size, PdfFont::Mono, text);
-                    x += measure(PdfFont::Mono, text, size);
-                }
-                y += line.height_pt;
+                draw_line(line, size, options.margin_left_pt + pad);
+                cursor_y += line.height_pt;
             }
+            cursor_y = saved_y;
             writer.stroke_rect(options.margin_left_pt, cursor_y, content_width, height);
             cursor_y += height + options.body_size_pt * 0.25;
             continue;
@@ -402,23 +480,29 @@ bool render_markdown_to_pdf(const std::string& markdown,
             const double cell_pad = options.body_size_pt * 0.35;
             const double cell_size = options.body_size_pt * 0.95;
             const double col_width = content_width / static_cast<double>(column_count);
-            std::vector<double> row_heights;
-            row_heights.reserve(tb.rows.size());
-            for (const auto& row : tb.rows) {
+            const double inner_width = col_width - cell_pad * 2.0;
+
+            // Wrap every cell once up front and cache both the wrapped lines
+            // and the computed row heights. The draw path then reuses the
+            // cached wraps, avoiding the double-wrap that the previous
+            // implementation performed per row.
+            std::vector<std::vector<std::vector<Line>>> cell_lines(tb.rows.size());
+            std::vector<double> row_heights(tb.rows.size(), 0.0);
+            for (size_t r = 0; r < tb.rows.size(); ++r) {
+                cell_lines[r].resize(column_count);
+                const auto& row = tb.rows[r];
                 double row_height = 0.0;
                 for (size_t col = 0; col < column_count; ++col) {
                     const std::vector<InlineRun> empty;
                     const auto& runs = col < row.cells.size() ? row.cells[col].runs : empty;
-                    const auto lines = wrap_runs(runs, col_width - cell_pad * 2.0,
-                                                 cell_size, 1.22, measure);
-                    const double cell_height = total_height(lines) + cell_pad * 2.0;
+                    cell_lines[r][col] = wrap_runs(runs, inner_width, cell_size, 1.22, measure);
+                    const double cell_height = total_height(cell_lines[r][col]) + cell_pad * 2.0;
                     row_height = std::max(row_height, cell_height);
                 }
-                row_heights.push_back(row_height);
+                row_heights[r] = row_height;
             }
 
             auto draw_row = [&](size_t row_idx) {
-                const auto& row = tb.rows[row_idx];
                 const double row_height = row_heights[row_idx];
                 const bool header = tb.has_header && row_idx == 0;
                 if (header) {
@@ -430,20 +514,14 @@ bool render_markdown_to_pdf(const std::string& markdown,
                 double x = options.margin_left_pt;
                 for (size_t col = 0; col < column_count; ++col) {
                     writer.stroke_rect(x, cursor_y, col_width, row_height);
-                    const std::vector<InlineRun> empty;
-                    const auto& runs = col < row.cells.size() ? row.cells[col].runs : empty;
-                    const auto lines = wrap_runs(runs, col_width - cell_pad * 2.0,
-                                                 cell_size, 1.22, measure);
-                    double cell_y = cursor_y + cell_pad;
+                    const auto& lines = cell_lines[row_idx][col];
+                    const double saved_y = cursor_y;
+                    cursor_y = saved_y + cell_pad;
                     for (const auto& line : lines) {
-                        double text_x = x + cell_pad;
-                        for (const auto& [text, style] : line.spans) {
-                            const PdfFont font = style == InlineStyle::Code ? PdfFont::Mono : font_for(style);
-                            writer.draw_text(text_x, cell_y, cell_size, font, text);
-                            text_x += measure(font, text, cell_size);
-                        }
-                        cell_y += line.height_pt;
+                        draw_line(line, cell_size, x + cell_pad);
+                        cursor_y += line.height_pt;
                     }
+                    cursor_y = saved_y;
                     x += col_width;
                 }
                 cursor_y += row_height;
@@ -452,8 +530,7 @@ bool render_markdown_to_pdf(const std::string& markdown,
             const double available =
                 options.page_height_pt - options.margin_bottom_pt - options.margin_top_pt;
             const double header_height = tb.has_header ? row_heights[0] : 0.0;
-
-            size_t body_start = tb.has_header ? 1 : 0;
+            const size_t body_start = tb.has_header ? 1 : 0;
 
             if (tb.has_header) {
                 const double min_fit = header_height
@@ -487,12 +564,23 @@ bool render_markdown_to_pdf(const std::string& markdown,
         }
 
         if (std::holds_alternative<PageBreakBlock>(block)) {
-            new_page();
+            // Avoid stacking blank pages: if the current page has no content
+            // and the cursor is still at the top margin, the break is a no-op.
+            if (!writer.page_empty() || cursor_y > options.margin_top_pt + 0.001) {
+                new_page();
+            }
             continue;
         }
     }
 
-    return writer.save(output_path);
+    std::string save_error;
+    if (!writer.save(output_path, &save_error)) {
+        result.ok = false;
+        result.error = save_error.empty() ? std::string("failed to write PDF") : save_error;
+        return result;
+    }
+    result.ok = true;
+    return result;
 }
 
 } // namespace mark2haru

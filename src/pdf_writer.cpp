@@ -124,6 +124,10 @@ std::vector<std::uint16_t> sorted_used_glyphs(const std::unordered_set<std::uint
     return out;
 }
 
+// PDF names are a permissive set of characters, but most fonts only need the
+// alphanumeric subset and this keeps the escaping rules simple. The prefix
+// guard prevents leading digits, which are legal in a PDF name but confuse
+// some viewers when the font is referenced by base name.
 std::string sanitize_pdf_name(std::string_view value)
 {
     std::string out;
@@ -142,6 +146,26 @@ std::string sanitize_pdf_name(std::string_view value)
     return out;
 }
 
+// File-scope Flate helper. Used both by PdfWriter::save's helpers below and by
+// the stream builders. Returns an empty string for empty input so callers can
+// cheaply decide whether Flate actually saved any bytes.
+std::string flate_compress(const std::string& input)
+{
+    if (input.empty()) {
+        return {};
+    }
+    uLongf dest_len = compressBound(static_cast<uLong>(input.size()));
+    std::string out(dest_len, '\0');
+    const int rc = compress2(reinterpret_cast<Bytef*>(&out[0]), &dest_len,
+                             reinterpret_cast<const Bytef*>(input.data()),
+                             static_cast<uLong>(input.size()), Z_BEST_COMPRESSION);
+    if (rc != Z_OK) {
+        return input;
+    }
+    out.resize(dest_len);
+    return out;
+}
+
 } // namespace
 
 PdfWriter::PdfWriter(double page_width_pt, double page_height_pt,
@@ -150,8 +174,20 @@ PdfWriter::PdfWriter(double page_width_pt, double page_height_pt,
     , page_height_pt_(page_height_pt)
     , font_root_(font_root)
 {
-    begin_page();
+    // No I/O in the constructor: callers must call init() and then check
+    // fonts_loaded() / font_error(). begin_page() is deferred to the first
+    // draw via current_content().
+}
+
+bool PdfWriter::init()
+{
     fonts_loaded_ = load_fonts();
+    return fonts_loaded_;
+}
+
+bool PdfWriter::page_empty() const
+{
+    return pages_.empty() || pages_.back().content.empty();
 }
 
 PdfWriter::LoadedFont& PdfWriter::font_slot(PdfFont font)
@@ -173,28 +209,6 @@ std::vector<PdfFont> PdfWriter::used_fonts(const std::array<LoadedFont, 5>& font
         }
     }
     return out;
-}
-
-std::string PdfWriter::encode_flate(const std::string& input)
-{
-    if (input.empty()) {
-        return {};
-    }
-    uLongf dest_len = compressBound(static_cast<uLong>(input.size()));
-    std::string out(dest_len, '\0');
-    const int rc = compress2(reinterpret_cast<Bytef*>(&out[0]), &dest_len,
-                             reinterpret_cast<const Bytef*>(input.data()),
-                             static_cast<uLong>(input.size()), Z_BEST_COMPRESSION);
-    if (rc != Z_OK) {
-        return input;
-    }
-    out.resize(dest_len);
-    return out;
-}
-
-std::string PdfWriter::encode_flate(const std::vector<std::uint8_t>& input)
-{
-    return encode_flate(std::string(reinterpret_cast<const char*>(input.data()), input.size()));
 }
 
 std::string PdfWriter::font_resource_name(PdfFont font)
@@ -304,8 +318,24 @@ bool PdfWriter::load_fonts()
     for (size_t i = 0; i < fonts_.size(); ++i) {
         auto& slot = fonts_[i];
         const auto path = resolve_font_path(font_root_, candidate_sets[i]);
-        if (path.empty() || !slot.face.load_from_file(path)) {
-            font_error_ = "Unable to load a Unicode-capable font for " + font_tag_name(static_cast<PdfFont>(i));
+        if (path.empty()) {
+            std::ostringstream err;
+            err << "Unable to locate a font file for " << font_tag_name(static_cast<PdfFont>(i))
+                << ". Tried: ";
+            for (size_t c = 0; c < candidate_sets[i].size(); ++c) {
+                if (c != 0) {
+                    err << ", ";
+                }
+                err << candidate_sets[i][c];
+            }
+            if (!font_root_.empty()) {
+                err << " (search root: " << font_root_.string() << ")";
+            }
+            font_error_ = err.str();
+            return false;
+        }
+        if (!slot.face.load_from_file(path)) {
+            font_error_ = "Failed to parse font file: " + path.string();
             return false;
         }
         slot.resource_name = "/F" + std::to_string(i + 1);
@@ -488,64 +518,101 @@ std::string PdfWriter::make_to_unicode_cmap(const LoadedFont& font)
     return cmap.str();
 }
 
-bool PdfWriter::save(const std::string& path) const
+// Build a deterministic 6-uppercase-letter subset prefix from the sorted set of
+// used glyph IDs. We do not perform true glyph subsetting yet, but emitting a
+// tag now means the PDF is structurally ready for it and tools that require a
+// subset prefix (PDF/A validators, some archival tooling) are happy.
+static std::string subset_tag_from_glyphs(const std::unordered_set<std::uint16_t>& used)
 {
-    if (!fonts_loaded_) {
+    std::uint64_t h = 0xcbf29ce484222325ull; // FNV-1a seed
+    std::vector<std::uint16_t> sorted(used.begin(), used.end());
+    std::sort(sorted.begin(), sorted.end());
+    for (std::uint16_t gid : sorted) {
+        h ^= static_cast<std::uint64_t>(gid);
+        h *= 0x100000001b3ull;
+    }
+    std::string tag(6, 'A');
+    for (int i = 0; i < 6; ++i) {
+        tag[i] = static_cast<char>('A' + (h % 26));
+        h /= 26;
+    }
+    return tag;
+}
+
+// Emit a stream object dictionary with optional Flate compression. The Flate
+// branch is only taken when the compressed payload is strictly smaller than
+// the raw input.
+static std::string build_stream_object(const std::string& raw)
+{
+    const std::string compressed = flate_compress(raw);
+    const bool use_flate = !compressed.empty() && compressed.size() < raw.size();
+    const std::string& payload = use_flate ? compressed : raw;
+    std::ostringstream ss;
+    ss << "<< /Length " << payload.size();
+    if (use_flate) {
+        ss << " /Filter /FlateDecode";
+    }
+    ss << " >>\nstream\n";
+    ss.write(payload.data(), static_cast<std::streamsize>(payload.size()));
+    ss << "\nendstream";
+    return ss.str();
+}
+
+static std::string build_stream_object(const std::vector<std::uint8_t>& raw)
+{
+    return build_stream_object(std::string(reinterpret_cast<const char*>(raw.data()), raw.size()));
+}
+
+bool PdfWriter::save(const std::string& path, std::string* error_out) const
+{
+    auto fail = [&](const std::string& msg) {
+        if (error_out) {
+            *error_out = msg;
+        }
         return false;
+    };
+
+    if (!fonts_loaded_) {
+        return fail(font_error_.empty() ? std::string("fonts not loaded") : font_error_);
     }
 
     std::ofstream out(path, std::ios::binary);
     if (!out) {
-        return false;
+        return fail("cannot open output file: " + path);
     }
+
+    // Push-based object table: object number 0 is the special free entry, so
+    // we seed `objects[0]` with an empty string and append real objects
+    // starting at index 1. Every helper below returns the assigned object
+    // number so cross-references stay consistent even if the structure
+    // changes in the future.
+    std::vector<std::string> objects;
+    objects.emplace_back(); // slot 0 unused
+    auto add_object = [&](std::string body) {
+        objects.push_back(std::move(body));
+        return static_cast<int>(objects.size() - 1);
+    };
+
+    // Reserve the catalog and pages dict numbers so their cross-references are
+    // known before page objects are emitted.
+    const int catalog_obj = add_object({});
+    const int pages_obj = add_object({});
 
     const auto used_fonts = PdfWriter::used_fonts(fonts_);
-    const int font_count = static_cast<int>(used_fonts.size());
-    const int page_count = static_cast<int>(pages_.size());
-    const int catalog_obj = 1;
-    const int pages_obj = 2;
-    const int font_base_obj = 3;
-    const int font_objects_per_face = 5;
-    const int content_base_obj = font_base_obj + font_count * font_objects_per_face;
-    const int page_base_obj = content_base_obj + page_count;
-    const int total_objects = page_base_obj + page_count - 1;
+    struct FontObjectRefs {
+        PdfFont font_id = PdfFont::Regular;
+        int type0_obj = 0;
+    };
+    std::vector<FontObjectRefs> font_refs;
+    font_refs.reserve(used_fonts.size());
 
-    std::vector<std::string> objects(static_cast<std::size_t>(total_objects + 1));
-    objects[catalog_obj] = "<< /Type /Catalog /Pages 2 0 R >>";
-
-    std::ostringstream kids;
-    kids << "[ ";
-    for (int i = 0; i < page_count; ++i) {
-        kids << (page_base_obj + i) << " 0 R ";
-    }
-    kids << "]";
-    objects[pages_obj] = "<< /Type /Pages /Kids " + kids.str() + " /Count "
-        + std::to_string(page_count) + " >>";
-
-    for (int used_index = 0; used_index < font_count; ++used_index) {
-        const PdfFont font_id = used_fonts[static_cast<std::size_t>(used_index)];
+    for (const PdfFont font_id : used_fonts) {
         const auto& slot = fonts_[static_cast<std::size_t>(font_id)];
-        const int type0_obj = font_base_obj + used_index * font_objects_per_face;
-        const int file_obj = type0_obj + 1;
-        const int desc_obj = type0_obj + 2;
-        const int cid_obj = type0_obj + 3;
-        const int unicode_obj = type0_obj + 4;
+        const std::string base_name = subset_tag_from_glyphs(slot.used_glyphs) + "+" + slot.tag_name;
 
-        const auto& bytes = slot.face.bytes();
-        const std::string font_compressed = encode_flate(bytes);
-        const bool font_is_compressed = !font_compressed.empty() && font_compressed.size() < bytes.size();
-        const std::string font_bytes = font_is_compressed
-            ? font_compressed
-            : std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size());
-        std::ostringstream font_stream;
-        font_stream << "<< /Length " << font_bytes.size();
-        if (font_is_compressed) {
-        font_stream << " /Filter /FlateDecode";
-        }
-        font_stream << " >>\nstream\n";
-        font_stream.write(font_bytes.data(), static_cast<std::streamsize>(font_bytes.size()));
-        font_stream << "\nendstream";
-        objects[file_obj] = font_stream.str();
+        // Emit stream objects first so they exist before the dicts that
+        // reference them.
+        const int file_obj = add_object(build_stream_object(slot.face.bytes()));
 
         const auto x_min = scale_1000(slot.face.x_min(), slot.face.units_per_em());
         const auto y_min = scale_1000(slot.face.y_min(), slot.face.units_per_em());
@@ -581,7 +648,7 @@ bool PdfWriter::save(const std::string& path) const
         }
 
         std::ostringstream desc;
-        desc << "<< /Type /FontDescriptor /FontName /" << slot.tag_name
+        desc << "<< /Type /FontDescriptor /FontName /" << base_name
              << " /Flags " << flags
              << " /Ascent " << number_to_string(ascent)
              << " /Descent " << number_to_string(descent)
@@ -591,7 +658,7 @@ bool PdfWriter::save(const std::string& path) const
              << number_to_string(x_min) << ' ' << number_to_string(y_min) << ' '
              << number_to_string(x_max) << ' ' << number_to_string(y_max)
              << "] /FontFile2 " << file_obj << " 0 R >>";
-        objects[desc_obj] = desc.str();
+        const int desc_obj = add_object(desc.str());
 
         std::ostringstream widths;
         widths << "[ ";
@@ -610,75 +677,100 @@ bool PdfWriter::save(const std::string& path) const
         widths << "]";
 
         std::ostringstream cidfont;
-        cidfont << "<< /Type /Font /Subtype /CIDFontType2 /BaseFont /" << slot.tag_name
+        cidfont << "<< /Type /Font /Subtype /CIDFontType2 /BaseFont /" << base_name
                 << " /FontDescriptor " << desc_obj << " 0 R /CIDSystemInfo << /Registry (Adobe)"
                 << " /Ordering (Identity) /Supplement 0 >> /CIDToGIDMap /Identity /DW "
                 << number_to_string(default_width_1000) << " /W " << widths.str() << " >>";
-        objects[cid_obj] = cidfont.str();
+        const int cid_obj = add_object(cidfont.str());
 
-        const std::string cmap = make_to_unicode_cmap(slot);
-        const std::string cmap_compressed = encode_flate(cmap);
-        const bool cmap_is_compressed = !cmap_compressed.empty() && cmap_compressed.size() < cmap.size();
-        const std::string cmap_bytes = cmap_is_compressed ? cmap_compressed : cmap;
-        std::ostringstream cmap_stream;
-        cmap_stream << "<< /Length " << cmap_bytes.size();
-        if (cmap_is_compressed) {
-        cmap_stream << " /Filter /FlateDecode";
-        }
-        cmap_stream << " >>\nstream\n";
-        cmap_stream.write(cmap_bytes.data(), static_cast<std::streamsize>(cmap_bytes.size()));
-        cmap_stream << "\nendstream";
-        objects[unicode_obj] = cmap_stream.str();
+        const int unicode_obj = add_object(build_stream_object(make_to_unicode_cmap(slot)));
 
         std::ostringstream type0_font;
-        type0_font << "<< /Type /Font /Subtype /Type0 /BaseFont /" << slot.tag_name
+        type0_font << "<< /Type /Font /Subtype /Type0 /BaseFont /" << base_name
                    << " /Encoding /Identity-H /DescendantFonts [ " << cid_obj
                    << " 0 R ] /ToUnicode " << unicode_obj << " 0 R >>";
-        objects[type0_obj] = type0_font.str();
+        const int type0_obj = add_object(type0_font.str());
+
+        font_refs.push_back({ font_id, type0_obj });
     }
 
-    for (int i = 0; i < page_count; ++i) {
-        const int content_obj = content_base_obj + i;
-        const int page_obj = page_base_obj + i;
-        const Page& page = pages_[static_cast<std::size_t>(i)];
+    // Build the shared resources dict once — pages share it by value since
+    // every page can reference every used font.
+    std::ostringstream resources;
+    resources << "<< /Font << ";
+    for (const auto& ref : font_refs) {
+        resources << font_resource_name(ref.font_id) << ' ' << ref.type0_obj << " 0 R ";
+    }
+    resources << ">> >>";
+    const std::string resources_body = resources.str();
 
-        const std::string content_compressed = encode_flate(page.content);
-        const bool content_is_compressed = !content_compressed.empty() && content_compressed.size() < page.content.size();
-        const std::string content_bytes = content_is_compressed ? content_compressed : page.content;
-        std::ostringstream content;
-        content << "<< /Length " << content_bytes.size();
-        if (content_is_compressed) {
-        content << " /Filter /FlateDecode";
-        }
-        content << " >>\nstream\n";
-        content.write(content_bytes.data(), static_cast<std::streamsize>(content_bytes.size()));
-        content << "\nendstream";
-        objects[content_obj] = content.str();
-
-        std::ostringstream resources;
-        resources << "<< /Font << ";
-        for (int used_index = 0; used_index < font_count; ++used_index) {
-            const PdfFont font_id = used_fonts[static_cast<std::size_t>(used_index)];
-            resources << font_resource_name(font_id) << ' '
-                      << (font_base_obj + used_index * font_objects_per_face) << " 0 R ";
-        }
-        resources << ">> >>";
-
+    // Emit each page: content stream first, then page object referencing it.
+    std::vector<int> page_obj_numbers;
+    page_obj_numbers.reserve(pages_.size());
+    for (const Page& page : pages_) {
+        const int content_obj = add_object(build_stream_object(page.content));
         std::ostringstream page_obj_body;
-        page_obj_body << "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 "
+        page_obj_body << "<< /Type /Page /Parent " << pages_obj
+                      << " 0 R /MediaBox [0 0 "
                       << number_to_string(page_width_pt_) << ' '
                       << number_to_string(page_height_pt_) << "] /Resources "
-                      << resources.str()
+                      << resources_body
                       << " /Contents " << content_obj << " 0 R >>";
-        objects[page_obj] = page_obj_body.str();
+        page_obj_numbers.push_back(add_object(page_obj_body.str()));
     }
+
+    // Now backfill the reserved catalog and pages-dict bodies.
+    {
+        std::ostringstream cat;
+        cat << "<< /Type /Catalog /Pages " << pages_obj << " 0 R >>";
+        objects[static_cast<std::size_t>(catalog_obj)] = cat.str();
+    }
+    {
+        std::ostringstream kids;
+        kids << "[ ";
+        for (int num : page_obj_numbers) {
+            kids << num << " 0 R ";
+        }
+        kids << "]";
+        std::ostringstream pd;
+        pd << "<< /Type /Pages /Kids " << kids.str() << " /Count "
+           << page_obj_numbers.size() << " >>";
+        objects[static_cast<std::size_t>(pages_obj)] = pd.str();
+    }
+
+    const int total_objects = static_cast<int>(objects.size()) - 1;
+
+    // Build a stable /ID from a hash of object bodies — two identical inputs
+    // produce identical /ID, and any content change flips it.
+    auto build_id = [&]() {
+        std::uint64_t h = 0xcbf29ce484222325ull;
+        auto mix = [&](const std::string& s) {
+            for (unsigned char c : s) {
+                h ^= c;
+                h *= 0x100000001b3ull;
+            }
+        };
+        for (const auto& obj : objects) {
+            mix(obj);
+        }
+        std::string hex;
+        hex.reserve(32);
+        for (int byte = 7; byte >= 0; --byte) {
+            const std::uint8_t b = static_cast<std::uint8_t>((h >> (byte * 8)) & 0xFF);
+            hex += hex_byte(b);
+        }
+        // Pad to 16 bytes by repeating for a more conventional 32-hex-char ID.
+        hex += hex;
+        return hex;
+    };
+    const std::string id_hex = build_id();
 
     const std::string header = "%PDF-1.4\n%\xE2\xE3\xCF\xD3\n";
     out.write(header.data(), static_cast<std::streamsize>(header.size()));
     std::vector<std::streamoff> offsets(static_cast<std::size_t>(total_objects + 1));
     for (int i = 1; i <= total_objects; ++i) {
         offsets[i] = out.tellp();
-        out << i << " 0 obj\n" << objects[i] << "\nendobj\n";
+        out << i << " 0 obj\n" << objects[static_cast<std::size_t>(i)] << "\nendobj\n";
     }
 
     const std::streamoff xref_pos = out.tellp();
@@ -689,8 +781,13 @@ bool PdfWriter::save(const std::string& path) const
             << " 00000 n \n";
     }
     out << "trailer\n<< /Size " << (total_objects + 1)
-        << " /Root 1 0 R >>\nstartxref\n" << xref_pos << "\n%%EOF\n";
-    return static_cast<bool>(out);
+        << " /Root " << catalog_obj << " 0 R"
+        << " /ID [<" << id_hex << "> <" << id_hex << ">]"
+        << " >>\nstartxref\n" << xref_pos << "\n%%EOF\n";
+    if (!out) {
+        return fail("write failed for output file: " + path);
+    }
+    return true;
 }
 
 } // namespace mark2haru

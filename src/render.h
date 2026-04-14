@@ -19,8 +19,13 @@ struct RenderOptions {
     std::filesystem::path font_root_dir;
 };
 
-bool render_markdown_to_pdf(const std::string& markdown,
-                            const std::string& output_path,
-                            const RenderOptions& options = {});
+struct RenderResult {
+    bool ok = false;
+    std::string error;
+};
+
+RenderResult render_markdown_to_pdf(const std::string& markdown,
+                                    const std::string& output_path,
+                                    const RenderOptions& options = {});
 
 } // namespace mark2haru

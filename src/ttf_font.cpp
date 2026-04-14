@@ -90,6 +90,19 @@ bool TrueTypeFont::load_from_file(const std::filesystem::path& path)
         return false;
     }
 
+    // Validate the 'head' magic number (0x5F0F3CF5) before trusting any of
+    // its fields. A well-formed head is at least 54 bytes; we only read
+    // through offset 42, but the magic check is the cheapest way to reject
+    // garbage that happens to have a valid-looking table directory.
+    if (head->offset + 54 > file_bytes_.size()) {
+        file_bytes_.clear();
+        return false;
+    }
+    if (read_u32(file_bytes_, head->offset + 12) != 0x5F0F3CF5u) {
+        file_bytes_.clear();
+        return false;
+    }
+
     units_per_em_ = read_u16(file_bytes_, head->offset + 18);
     x_min_ = read_i16(file_bytes_, head->offset + 36);
     y_min_ = read_i16(file_bytes_, head->offset + 38);
@@ -102,7 +115,11 @@ bool TrueTypeFont::load_from_file(const std::filesystem::path& path)
     num_glyphs_ = read_u16(file_bytes_, maxp->offset + 4);
 
     if (post && post->offset + 16 <= file_bytes_.size()) {
-        // italicAngle: Fixed (16.16) signed
+        // italicAngle: Fixed (16.16) signed. Reading the integer half as
+        // signed and the fraction half as unsigned, then summing, is the
+        // correct decoding under two's complement: for -11.25 the raw bytes
+        // are 0xFFF4_C000 which yields int16=-12 and frac=0.75, summing to
+        // -11.25. This looks surprising but is faithful to the format.
         const std::int16_t angle_int = read_i16(file_bytes_, post->offset + 4);
         const std::uint16_t angle_frac = read_u16(file_bytes_, post->offset + 6);
         italic_angle_ = static_cast<double>(angle_int)
@@ -215,6 +232,16 @@ std::uint16_t TrueTypeFont::lookup_cmap4(std::uint32_t codepoint) const
     const std::uint32_t start_codes = end_codes + seg_count * 2 + 2;
     const std::uint32_t id_deltas = start_codes + seg_count * 2;
     const std::uint32_t id_range_offsets = id_deltas + seg_count * 2;
+    // Bounds check the four parallel arrays before iterating. A malformed
+    // cmap4 subtable with a bogus seg_count could otherwise walk past the
+    // end of the font buffer while reading id_range_offsets.
+    if (id_range_offsets + static_cast<std::uint32_t>(seg_count) * 2 > file_bytes_.size()) {
+        return 0;
+    }
+    // NOTE: Linear scan is intentional — a brief-sized document touches at
+    // most a few hundred code points, and DejaVu Sans's cmap4 has ~150
+    // segments. A binary search would be faster for large scripts but adds
+    // code nobody exercises; revisit if profiling shows otherwise.
     for (std::uint16_t i = 0; i < seg_count; ++i) {
         const std::uint32_t end_code = read_u16(file_bytes_, end_codes + i * 2);
         const std::uint32_t start_code = read_u16(file_bytes_, start_codes + i * 2);
@@ -256,6 +283,12 @@ std::uint16_t TrueTypeFont::glyph_for_codepoint(std::uint32_t codepoint) const
     if (gid == 0) {
         gid = lookup_cmap4(codepoint);
     }
+    // Cap the cache so pathological input (e.g. an entire Unicode sweep)
+    // cannot grow it without bound. Clearing wholesale is acceptable because
+    // every entry is recomputed on demand and lookups stay O(seg_count).
+    if (glyph_cache_.size() >= 4096) {
+        glyph_cache_.clear();
+    }
     glyph_cache_[codepoint] = gid;
     return gid;
 }
@@ -273,6 +306,10 @@ std::uint16_t TrueTypeFont::advance_width_for_gid(std::uint16_t gid) const
 
 double TrueTypeFont::advance_width_pt(std::uint32_t codepoint, double size_pt) const
 {
+    // NOTE: advance widths come from hmtx only. GPOS kerning and the legacy
+    // 'kern' table are intentionally not consulted — briefs look fine without
+    // kerning, and the parser is deliberately kept small. If you need tight
+    // typographic fidelity, this is the first place to extend.
     const std::uint16_t gid = glyph_for_codepoint(codepoint);
     const std::uint16_t adv = advance_width_for_gid(gid);
     if (units_per_em_ == 0) {

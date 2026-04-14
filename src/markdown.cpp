@@ -39,19 +39,22 @@ std::string rtrim(const std::string& s)
 
 std::vector<std::string> split_lines(const std::string& text)
 {
+    // Split on '\n', stripping a trailing '\r' from each line to handle CRLF
+    // input transparently. A trailing newline at EOF does *not* produce a
+    // spurious empty final line, which avoids extra paragraph flushes later.
     std::vector<std::string> lines;
     size_t pos = 0;
-    while (pos <= text.size()) {
+    while (pos < text.size()) {
         const size_t nl = text.find('\n', pos);
         if (nl == std::string::npos) {
-            auto line = text.substr(pos);
+            std::string line = text.substr(pos);
             if (!line.empty() && line.back() == '\r') {
                 line.pop_back();
             }
             lines.push_back(std::move(line));
             break;
         }
-        auto line = text.substr(pos, nl - pos);
+        std::string line = text.substr(pos, nl - pos);
         if (!line.empty() && line.back() == '\r') {
             line.pop_back();
         }
@@ -110,6 +113,65 @@ size_t find_closing_underscore(std::string_view s, size_t start, size_t delim_le
     return std::string::npos;
 }
 
+// Characters that a leading backslash may escape in CommonMark. Anything else
+// leaves the backslash as a literal so we never silently eat it.
+bool is_escapable(char c)
+{
+    return c == '\\' || c == '`' || c == '*' || c == '_' || c == '{' || c == '}'
+        || c == '[' || c == ']' || c == '(' || c == ')' || c == '#' || c == '+'
+        || c == '-' || c == '.' || c == '!' || c == '|' || c == '~';
+}
+
+// Find the next backtick run with exactly `run_len` backticks on the same
+// line. Used to support multi-backtick inline code so `` ``x ` y`` `` closes
+// correctly.
+size_t find_backtick_run(std::string_view s, size_t start, size_t run_len)
+{
+    size_t pos = start;
+    while (pos < s.size() && s[pos] != '\n') {
+        if (s[pos] != '`') {
+            ++pos;
+            continue;
+        }
+        const size_t run_start = pos;
+        while (pos < s.size() && s[pos] == '`') {
+            ++pos;
+        }
+        if (pos - run_start == run_len) {
+            return run_start;
+        }
+    }
+    return std::string::npos;
+}
+
+// Read a link destination enclosed in `(...)`, tolerating balanced parens
+// inside (e.g. Wikipedia URLs). Returns the position of the closing paren, or
+// npos if the destination is malformed or unclosed on this line.
+size_t find_link_close(std::string_view s, size_t open)
+{
+    int depth = 1;
+    size_t pos = open + 1;
+    while (pos < s.size()) {
+        const char c = s[pos];
+        if (c == '\n') {
+            return std::string::npos;
+        }
+        if (c == '\\' && pos + 1 < s.size() && is_escapable(s[pos + 1])) {
+            pos += 2;
+            continue;
+        }
+        if (c == '(') {
+            ++depth;
+        } else if (c == ')') {
+            if (--depth == 0) {
+                return pos;
+            }
+        }
+        ++pos;
+    }
+    return std::string::npos;
+}
+
 std::vector<InlineRun> parse_inline(const std::string& text)
 {
     std::vector<InlineRun> runs;
@@ -128,6 +190,14 @@ std::vector<InlineRun> parse_inline(const std::string& text)
     };
 
     while (i < text.size()) {
+        // Backslash escapes: `\*` → literal `*`. Unrecognized escapes keep
+        // the backslash so we never surprise users with vanishing characters.
+        if (text[i] == '\\' && i + 1 < text.size() && is_escapable(text[i + 1])) {
+            current.push_back(text[i + 1]);
+            i += 2;
+            continue;
+        }
+
         if (starts_with(text, i, "***")) {
             const size_t close = find_asterisk_run(text, i + 3, 3);
             if (close != std::string::npos) {
@@ -189,11 +259,19 @@ std::vector<InlineRun> parse_inline(const std::string& text)
         }
 
         if (text[i] == '`') {
-            const size_t close = text.find('`', i + 1);
+            // Count the opening backtick run and match a closing run of the
+            // same length. Content between is taken literally (including
+            // shorter backtick runs), which matches CommonMark's behaviour
+            // for inline code.
+            size_t run_len = 0;
+            while (i + run_len < text.size() && text[i + run_len] == '`') {
+                ++run_len;
+            }
+            const size_t close = find_backtick_run(text, i + run_len, run_len);
             if (close != std::string::npos) {
                 flush();
-                runs.push_back({ text.substr(i + 1, close - i - 1), InlineStyle::Code });
-                i = close + 1;
+                runs.push_back({ text.substr(i + run_len, close - i - run_len), InlineStyle::Code });
+                i = close + run_len;
                 continue;
             }
         }
@@ -201,7 +279,7 @@ std::vector<InlineRun> parse_inline(const std::string& text)
         if (text[i] == '[') {
             const size_t bracket_close = text.find("](", i + 1);
             if (bracket_close != std::string::npos) {
-                const size_t paren_close = text.find(')', bracket_close + 2);
+                const size_t paren_close = find_link_close(text, bracket_close + 1);
                 if (paren_close != std::string::npos) {
                     const std::string display = text.substr(i + 1, bracket_close - i - 1);
                     const std::string url = text.substr(bracket_close + 2,
@@ -266,8 +344,20 @@ ClassifiedLine classify_line(const std::string& line)
         while (level < 6 && level < static_cast<int>(trimmed.size()) && trimmed[level] == '#') {
             ++level;
         }
-        if (level > 0 && level < static_cast<int>(trimmed.size()) && trimmed[level] == ' ') {
-            return { ClassifiedLine::Type::Heading, trim(trimmed.substr(level + 1)), level, 0 };
+        // Accept both `# foo` (one or more spaces) and a lone `#` line.
+        if (level > 0 && level <= 6) {
+            const bool has_space = level < static_cast<int>(trimmed.size())
+                && trimmed[level] == ' ';
+            const bool bare = level == static_cast<int>(trimmed.size());
+            if (has_space || bare) {
+                std::string body = bare ? std::string() : trim(trimmed.substr(level + 1));
+                // Strip optional closing hashes: "## Title ##" → "Title".
+                while (!body.empty() && body.back() == '#') {
+                    body.pop_back();
+                }
+                body = trim(body);
+                return { ClassifiedLine::Type::Heading, std::move(body), level, 0 };
+            }
         }
     }
 
@@ -447,39 +537,34 @@ std::vector<Block> parse_markdown(const std::string& input)
         }
 
         case ClassifiedLine::Type::TableRow: {
-            if (i + 1 < lines.size()
-                && classify_line(lines[i + 1]).type == ClassifiedLine::Type::TableSeparator) {
-                flush_paragraph();
-                TableBlock table;
-                while (i < lines.size()) {
-                    const ClassifiedLine row_line = classify_line(lines[i]);
-                    if (row_line.type == ClassifiedLine::Type::TableSeparator) {
-                        table.has_header = true;
-                        ++i;
-                        continue;
-                    }
-                    if (row_line.type != ClassifiedLine::Type::TableRow) {
-                        break;
-                    }
-
-                    TableRow row;
-                    const auto cells = split_table_cells(row_line.content);
-                    for (const auto& cell_text : cells) {
-                        TableCell cell;
-                        cell.runs = parse_inline(cell_text);
-                        row.cells.push_back(std::move(cell));
-                    }
-                    table.rows.push_back(std::move(row));
+            // Accept both "| h1 | h2 |\n| --- | --- |\n| a | b |" (with
+            // header separator) and "| a | b |\n| c | d |" (raw pipe table
+            // with no header). The separator is still recognised so we can
+            // shade the header row.
+            flush_paragraph();
+            TableBlock table;
+            while (i < lines.size()) {
+                const ClassifiedLine row_line = classify_line(lines[i]);
+                if (row_line.type == ClassifiedLine::Type::TableSeparator) {
+                    table.has_header = true;
                     ++i;
+                    continue;
                 }
-                blocks.push_back(std::move(table));
-            } else {
-                if (!paragraph_accum.empty()) {
-                    paragraph_accum.push_back(' ');
+                if (row_line.type != ClassifiedLine::Type::TableRow) {
+                    break;
                 }
-                paragraph_accum += cl.content;
+
+                TableRow row;
+                const auto cells = split_table_cells(row_line.content);
+                for (const auto& cell_text : cells) {
+                    TableCell cell;
+                    cell.runs = parse_inline(cell_text);
+                    row.cells.push_back(std::move(cell));
+                }
+                table.rows.push_back(std::move(row));
                 ++i;
             }
+            blocks.push_back(std::move(table));
             break;
         }
 

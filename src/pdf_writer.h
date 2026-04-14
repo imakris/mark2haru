@@ -30,6 +30,11 @@ public:
     PdfWriter(double page_width_pt, double page_height_pt,
               const std::filesystem::path& font_root = {});
 
+    // Explicit init: resolves and parses all five font faces. Returns false on
+    // any failure; call `font_error()` for the reason. The constructor no
+    // longer performs I/O so callers can construct a writer cheaply and then
+    // fail gracefully.
+    bool init();
     bool fonts_loaded() const { return fonts_loaded_; }
     const std::string& font_error() const { return font_error_; }
 
@@ -43,8 +48,9 @@ public:
     double measure_text_width(PdfFont font, const std::string& text, double size_pt) const;
     void draw_text(double x_pt, double y_top_pt, double size_pt, PdfFont font,
                    const std::string& text);
-    bool save(const std::string& path) const;
+    bool save(const std::string& path, std::string* error_out = nullptr) const;
 
+    bool page_empty() const;
     double page_width_pt() const { return page_width_pt_; }
     double page_height_pt() const { return page_height_pt_; }
 
@@ -89,8 +95,6 @@ private:
                                               const std::string& text);
     static std::string make_to_unicode_cmap(const LoadedFont& font);
     static std::vector<PdfFont> used_fonts(const std::array<LoadedFont, 5>& fonts);
-    static std::string encode_flate(const std::string& input);
-    static std::string encode_flate(const std::vector<std::uint8_t>& input);
 };
 
 } // namespace mark2haru
