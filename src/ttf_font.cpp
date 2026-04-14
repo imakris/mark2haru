@@ -47,7 +47,7 @@ std::uint32_t TrueTypeFont::read_u32(const std::vector<std::uint8_t>& data, std:
 
 bool TrueTypeFont::load_from_file(const std::filesystem::path& path)
 {
-    source_path_ = path.string();
+    source_path_ = path;
     if (!read_file_bytes(path, file_bytes_)) {
         file_bytes_.clear();
         return false;

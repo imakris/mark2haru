@@ -1,7 +1,7 @@
 #pragma once
 
-#include "font_context.h"
-#include "markdown.h"
+#include <mark2haru/font_context.h>
+#include <mark2haru/markdown.h>
 
 #include <filesystem>
 #include <string>

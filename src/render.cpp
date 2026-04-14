@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <memory>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -329,19 +331,20 @@ double first_line_height(const Block& block, double content_width,
 
 } // namespace
 
-RenderResult render_markdown_to_pdf(const std::string& markdown,
-                                    const std::string& output_path,
-                                    const RenderOptions& options)
+bool render_markdown_to_pdf(const std::string& markdown,
+                            const std::filesystem::path& output_path,
+                            const RenderOptions& options)
 {
     RenderResult result;
     const auto blocks = parse_markdown(markdown);
-    PdfWriter writer(options.page_width_pt, options.page_height_pt, options.font_root_dir);
-    if (!writer.init()) {
-        result.ok = false;
-        result.error = writer.font_error().empty()
-            ? std::string("failed to load fonts")
-            : writer.font_error();
-        return result;
+    auto metrics = std::make_shared<MeasurementContext>(options.font_family, options.font_root_dir);
+    if (!metrics->loaded()) {
+        return false;
+    }
+
+    PdfWriter writer(options.page_width_pt, options.page_height_pt, metrics);
+    if (!writer.fonts_loaded()) {
+        return false;
     }
 
     writer.set_stroke_color({ 0.2, 0.2, 0.2 });
@@ -363,7 +366,7 @@ RenderResult render_markdown_to_pdf(const std::string& markdown,
     };
 
     auto measure = [&](PdfFont font, const std::string& text, double size_pt) {
-        return writer.measure_text_width(font, text, size_pt);
+        return metrics->measure_text_width(font, text, size_pt);
     };
 
     auto draw_line = [&](const Line& line, double size_pt, double x_pt) {

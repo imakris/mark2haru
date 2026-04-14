@@ -1,7 +1,7 @@
 #pragma once
 
-#include "font_context.h"
-#include "png_image.h"
+#include <mark2haru/font_context.h>
+#include <mark2haru/png_image.h>
 
 #include <array>
 #include <filesystem>
@@ -44,7 +44,6 @@ public:
                   const std::filesystem::path& path);
     bool save(const std::filesystem::path& path) const;
 
-    bool page_empty() const;
     double page_width_pt() const { return page_width_pt_; }
     double page_height_pt() const { return page_height_pt_; }
 
@@ -86,6 +85,8 @@ private:
                                               const std::string& text);
     static std::string make_to_unicode_cmap(const LoadedFont& font);
     static std::vector<PdfFont> used_fonts(const std::array<LoadedFont, 5>& fonts);
+    static std::string encode_flate(const std::string& input);
+    static std::string encode_flate(const std::vector<std::uint8_t>& input);
 };
 
 } // namespace mark2haru
