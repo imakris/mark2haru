@@ -61,14 +61,23 @@ std::vector<std::string> split_lines(const std::string& text)
     return lines;
 }
 
-size_t find_closing(std::string_view s, size_t start, std::string_view delim)
+// Find the next asterisk run whose length is exactly `run_len`, skipping runs
+// of other lengths. Used to prevent a single `*` italic from closing on the
+// first star of a nested `**bold**`, and similarly for `**`/`***`.
+size_t find_asterisk_run(std::string_view s, size_t start, size_t run_len)
 {
-    for (size_t pos = start; pos + delim.size() <= s.size(); ++pos) {
-        if (s[pos] == '\n') {
-            return std::string::npos;
+    size_t pos = start;
+    while (pos < s.size() && s[pos] != '\n') {
+        if (s[pos] != '*') {
+            ++pos;
+            continue;
         }
-        if (s.substr(pos, delim.size()) == delim) {
-            return pos;
+        const size_t run_start = pos;
+        while (pos < s.size() && s[pos] == '*') {
+            ++pos;
+        }
+        if (pos - run_start == run_len) {
+            return run_start;
         }
     }
     return std::string::npos;
@@ -120,7 +129,7 @@ std::vector<InlineRun> parse_inline(const std::string& text)
 
     while (i < text.size()) {
         if (starts_with(text, i, "***")) {
-            const size_t close = find_closing(text, i + 3, "***");
+            const size_t close = find_asterisk_run(text, i + 3, 3);
             if (close != std::string::npos) {
                 flush();
                 runs.push_back({ text.substr(i + 3, close - i - 3), InlineStyle::BoldItalic });
@@ -130,7 +139,7 @@ std::vector<InlineRun> parse_inline(const std::string& text)
         }
 
         if (starts_with(text, i, "**")) {
-            const size_t close = find_closing(text, i + 2, "**");
+            const size_t close = find_asterisk_run(text, i + 2, 2);
             if (close != std::string::npos) {
                 flush();
                 runs.push_back({ text.substr(i + 2, close - i - 2), InlineStyle::Bold });
@@ -140,7 +149,7 @@ std::vector<InlineRun> parse_inline(const std::string& text)
         }
 
         if (text[i] == '*' && !starts_with(text, i, "**")) {
-            const size_t close = find_closing(text, i + 1, "*");
+            const size_t close = find_asterisk_run(text, i + 1, 1);
             if (close != std::string::npos) {
                 flush();
                 runs.push_back({ text.substr(i + 1, close - i - 1), InlineStyle::Italic });
@@ -303,16 +312,21 @@ ClassifiedLine classify_line(const std::string& line)
 std::vector<std::string> split_table_cells(const std::string& row)
 {
     std::vector<std::string> cells;
-    size_t i = 0;
-    if (!row.empty() && row.front() == '|') {
-        ++i;
+    std::string working = row;
+    if (!working.empty() && working.front() == '|') {
+        working.erase(0, 1);
     }
-    while (i < row.size()) {
-        const size_t pipe = row.find('|', i);
+    if (!working.empty() && working.back() == '|') {
+        working.pop_back();
+    }
+    size_t i = 0;
+    while (i <= working.size()) {
+        const size_t pipe = working.find('|', i);
         if (pipe == std::string::npos) {
+            cells.push_back(trim(working.substr(i)));
             break;
         }
-        cells.push_back(trim(row.substr(i, pipe - i)));
+        cells.push_back(trim(working.substr(i, pipe - i)));
         i = pipe + 1;
     }
     return cells;
@@ -387,28 +401,39 @@ std::vector<Block> parse_markdown(const std::string& input)
             lb.ordered = ordered;
             lb.start_number = cl.list_number > 0 ? cl.list_number : 1;
 
+            std::string item_text;
+            bool item_open = false;
+            auto flush_item = [&]() {
+                if (!item_open) {
+                    return;
+                }
+                ListItem item;
+                item.runs = parse_inline(item_text);
+                lb.items.push_back(std::move(item));
+                item_text.clear();
+                item_open = false;
+            };
+
             while (i < lines.size()) {
                 const ClassifiedLine item_line = classify_line(lines[i]);
                 const bool matching =
                     (ordered && item_line.type == ClassifiedLine::Type::OrderedItem)
                     || (!ordered && item_line.type == ClassifiedLine::Type::BulletItem);
                 if (matching) {
-                    ListItem item;
-                    item.runs = parse_inline(item_line.content);
-                    lb.items.push_back(std::move(item));
+                    flush_item();
+                    item_text = item_line.content;
+                    item_open = true;
                     ++i;
                     continue;
                 }
 
-                if (!lb.items.empty() && item_line.type == ClassifiedLine::Type::Text
+                if (item_open && item_line.type == ClassifiedLine::Type::Text
                     && !lines[i].empty()
                     && (lines[i][0] == ' ' || lines[i][0] == '\t')) {
-                    auto& last = lb.items.back();
-                    const std::string cont = " " + item_line.content;
-                    auto cont_runs = parse_inline(cont);
-                    last.runs.insert(last.runs.end(),
-                                     std::make_move_iterator(cont_runs.begin()),
-                                     std::make_move_iterator(cont_runs.end()));
+                    if (!item_text.empty()) {
+                        item_text.push_back(' ');
+                    }
+                    item_text += item_line.content;
                     ++i;
                     continue;
                 }
@@ -416,6 +441,7 @@ std::vector<Block> parse_markdown(const std::string& input)
                 break;
             }
 
+            flush_item();
             blocks.push_back(std::move(lb));
             break;
         }
@@ -449,7 +475,7 @@ std::vector<Block> parse_markdown(const std::string& input)
                 blocks.push_back(std::move(table));
             } else {
                 if (!paragraph_accum.empty()) {
-                    paragraph_accum.push_back('\n');
+                    paragraph_accum.push_back(' ');
                 }
                 paragraph_accum += cl.content;
                 ++i;
@@ -459,7 +485,7 @@ std::vector<Block> parse_markdown(const std::string& input)
 
         case ClassifiedLine::Type::TableSeparator:
             if (!paragraph_accum.empty()) {
-                paragraph_accum.push_back('\n');
+                paragraph_accum.push_back(' ');
             }
             paragraph_accum += cl.content;
             ++i;
@@ -474,7 +500,7 @@ std::vector<Block> parse_markdown(const std::string& input)
         case ClassifiedLine::Type::Text:
         default:
             if (!paragraph_accum.empty()) {
-                paragraph_accum.push_back('\n');
+                paragraph_accum.push_back(' ');
             }
             paragraph_accum += cl.content;
             ++i;

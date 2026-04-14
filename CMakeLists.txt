@@ -12,10 +12,12 @@ add_executable(mark2haru
     src/pdf_writer.cpp
     src/render.cpp
     src/ttf_font.cpp
+    # miniz_zip.c is intentionally excluded — we only use compress2/compressBound
+    # from miniz.c (with deflate from miniz_tdef.c). The zip archive support
+    # pulls in a lot of unused code.
     third_party/miniz/miniz.c
     third_party/miniz/miniz_tdef.c
     third_party/miniz/miniz_tinfl.c
-    third_party/miniz/miniz_zip.c
 )
 
 target_include_directories(mark2haru PRIVATE
@@ -46,4 +48,41 @@ add_custom_command(TARGET mark2haru POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         ${CMAKE_CURRENT_SOURCE_DIR}/fonts/DejaVuSansMono.ttf
         $<TARGET_FILE_DIR:mark2haru>/fonts/DejaVuSansMono.ttf
+)
+
+# Smoke tests: render each bundled example and verify the output starts with
+# "%PDF-". This catches silent breakage in the markdown parser, wrap engine,
+# and PDF writer without pinning to byte-exact golden files.
+enable_testing()
+
+add_test(
+    NAME smoke_render_neutral_brief
+    COMMAND mark2haru
+        ${CMAKE_CURRENT_SOURCE_DIR}/examples/neutral_brief.md
+        ${CMAKE_CURRENT_BINARY_DIR}/neutral_brief.pdf
+)
+add_test(
+    NAME smoke_check_neutral_brief_header
+    COMMAND ${CMAKE_COMMAND}
+        -DPDF=${CMAKE_CURRENT_BINARY_DIR}/neutral_brief.pdf
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_pdf_header.cmake
+)
+set_tests_properties(smoke_check_neutral_brief_header PROPERTIES
+    DEPENDS smoke_render_neutral_brief
+)
+
+add_test(
+    NAME smoke_render_western_european
+    COMMAND mark2haru
+        ${CMAKE_CURRENT_SOURCE_DIR}/examples/western_european.md
+        ${CMAKE_CURRENT_BINARY_DIR}/western_european.pdf
+)
+add_test(
+    NAME smoke_check_western_european_header
+    COMMAND ${CMAKE_COMMAND}
+        -DPDF=${CMAKE_CURRENT_BINARY_DIR}/western_european.pdf
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_pdf_header.cmake
+)
+set_tests_properties(smoke_check_western_european_header PROPERTIES
+    DEPENDS smoke_render_western_european
 )

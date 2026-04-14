@@ -2,9 +2,11 @@
 
 #include "ttf_font.h"
 
+#include <array>
 #include <filesystem>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace mark2haru {
@@ -56,7 +58,7 @@ private:
         std::string resource_name;
         std::string tag_name;
         std::unordered_map<std::uint16_t, std::uint32_t> gid_to_unicode;
-        std::vector<std::uint16_t> used_glyphs;
+        std::unordered_set<std::uint16_t> used_glyphs;
         bool used = false;
     };
 
@@ -85,7 +87,6 @@ private:
     static std::string utf8_to_hex_cid_string(const TrueTypeFont& font,
                                               LoadedFont& loaded,
                                               const std::string& text);
-    static std::string unicode_to_utf16be_hex(std::uint32_t codepoint);
     static std::string make_to_unicode_cmap(const LoadedFont& font);
     static std::vector<PdfFont> used_fonts(const std::array<LoadedFont, 5>& fonts);
     static std::string encode_flate(const std::string& input);

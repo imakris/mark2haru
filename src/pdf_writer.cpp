@@ -1,6 +1,8 @@
 #include "pdf_writer.h"
 
+#include <algorithm>
 #include <array>
+#include <cstdlib>
 #include <fstream>
 #include <iomanip>
 #include <sstream>
@@ -17,7 +19,23 @@ std::string number_to_string(T value)
     std::ostringstream ss;
     ss.setf(std::ios::fixed);
     ss << std::setprecision(3) << value;
-    return ss.str();
+    std::string out = ss.str();
+    if (out.find('.') != std::string::npos) {
+        const size_t last = out.find_last_not_of('0');
+        if (last != std::string::npos) {
+            out.erase(last + 1);
+        }
+        if (!out.empty() && out.back() == '.') {
+            out.pop_back();
+        }
+    }
+    if (out == "-0") {
+        out = "0";
+    }
+    if (out.empty()) {
+        out = "0";
+    }
+    return out;
 }
 
 std::string hex_byte(std::uint8_t byte)
@@ -97,6 +115,13 @@ double scale_1000(std::int16_t value, std::uint16_t units_per_em)
         return static_cast<double>(value);
     }
     return static_cast<double>(value) * 1000.0 / static_cast<double>(units_per_em);
+}
+
+std::vector<std::uint16_t> sorted_used_glyphs(const std::unordered_set<std::uint16_t>& set)
+{
+    std::vector<std::uint16_t> out(set.begin(), set.end());
+    std::sort(out.begin(), out.end());
+    return out;
 }
 
 std::string sanitize_pdf_name(std::string_view value)
@@ -230,12 +255,37 @@ std::filesystem::path PdfWriter::resolve_font_path(
     }
 
     const std::vector<std::filesystem::path> system_roots = {
+        // Windows
         R"(C:\Windows\Fonts)",
         R"(C:\Windows\Fonts\truetype)",
+        // Linux
+        "/usr/share/fonts",
+        "/usr/share/fonts/truetype",
+        "/usr/share/fonts/truetype/dejavu",
+        "/usr/share/fonts/TTF",
+        "/usr/share/fonts/dejavu",
+        "/usr/local/share/fonts",
+        // macOS
+        "/Library/Fonts",
+        "/System/Library/Fonts",
+        "/System/Library/Fonts/Supplemental",
     };
     for (const auto& dir : system_roots) {
         if (auto p = try_dir(dir); !p.empty()) {
             return p;
+        }
+    }
+    if (const char* home = std::getenv("HOME")) {
+        const std::filesystem::path home_path(home);
+        const std::vector<std::filesystem::path> user_roots = {
+            home_path / ".fonts",
+            home_path / ".local/share/fonts",
+            home_path / "Library/Fonts",
+        };
+        for (const auto& dir : user_roots) {
+            if (auto p = try_dir(dir); !p.empty()) {
+                return p;
+            }
         }
     }
     return {};
@@ -341,7 +391,10 @@ double PdfWriter::measure_text_width(PdfFont font, const std::string& text, doub
     const auto& slot = font_slot(font);
     double width_units = 0.0;
     for (std::uint32_t cp : decode_utf8(text)) {
-        const std::uint16_t gid = slot.face.glyph_for_codepoint(cp);
+        std::uint16_t gid = slot.face.glyph_for_codepoint(cp);
+        if (gid == 0) {
+            gid = slot.face.glyph_for_codepoint('?');
+        }
         width_units += slot.face.advance_width_for_gid(gid);
     }
     if (slot.face.units_per_em() == 0) {
@@ -357,17 +410,19 @@ std::string PdfWriter::utf8_to_hex_cid_string(const TrueTypeFont& font,
     std::vector<std::uint16_t> gids;
     gids.reserve(text.size());
     for (std::uint32_t cp : decode_utf8(text)) {
-        const std::uint16_t gid = font.glyph_for_codepoint(cp);
+        std::uint16_t gid = font.glyph_for_codepoint(cp);
+        std::uint32_t recorded_cp = cp;
+        if (gid == 0) {
+            const std::uint16_t fallback = font.glyph_for_codepoint('?');
+            if (fallback != 0) {
+                gid = fallback;
+                recorded_cp = '?';
+            }
+        }
         gids.push_back(gid);
         if (gid != 0) {
-            loaded.gid_to_unicode.emplace(gid, cp);
-        }
-    }
-
-    for (std::uint16_t gid : gids) {
-        if (std::find(loaded.used_glyphs.begin(), loaded.used_glyphs.end(), gid)
-            == loaded.used_glyphs.end()) {
-            loaded.used_glyphs.push_back(gid);
+            loaded.gid_to_unicode.emplace(gid, recorded_cp);
+            loaded.used_glyphs.insert(gid);
         }
     }
 
@@ -390,11 +445,6 @@ void PdfWriter::draw_text(double x_pt, double y_top_pt, double size_pt, PdfFont 
         + " Td\n";
     out += encoded;
     out += " Tj\nET\n";
-}
-
-std::string PdfWriter::unicode_to_utf16be_hex(std::uint32_t codepoint)
-{
-    return utf16be_hex_from_codepoint(codepoint);
 }
 
 std::string PdfWriter::make_to_unicode_cmap(const LoadedFont& font)
@@ -426,7 +476,7 @@ std::string PdfWriter::make_to_unicode_cmap(const LoadedFont& font)
             const auto& [gid, cp] = pairs[i + j];
             cmap << '<' << hex_byte(static_cast<std::uint8_t>((gid >> 8) & 0xFF))
                  << hex_byte(static_cast<std::uint8_t>(gid & 0xFF)) << "> <"
-                 << unicode_to_utf16be_hex(cp) << ">\n";
+                 << utf16be_hex_from_codepoint(cp) << ">\n";
         }
         cmap << "endbfchar\n";
     }
@@ -510,14 +560,34 @@ bool PdfWriter::save(const std::string& path) const
                                                      slot.face.units_per_em());
         const double ascent = scale_1000(slot.face.ascent(), slot.face.units_per_em());
         const double descent = scale_1000(slot.face.descent(), slot.face.units_per_em());
-        const double cap_height = ascent;
+        const double cap_height = slot.face.cap_height() != 0
+            ? scale_1000(slot.face.cap_height(), slot.face.units_per_em())
+            : ascent;
+        const double italic_angle = slot.face.italic_angle();
+
+        // FontDescriptor /Flags bits (PDF 1.7, 9.8.2):
+        //   bit  1 (0x01) = fixed pitch
+        //   bit  3 (0x04) = symbolic (contains glyphs outside Adobe standard Latin)
+        //   bit  6 (0x20) = nonsymbolic (Adobe standard Latin only)
+        //   bit  7 (0x40) = italic
+        // We embed Identity-H CID fonts with large glyph sets, so symbolic
+        // is the right bucket. Mark italic and fixed-pitch when appropriate.
+        unsigned flags = 0x04; // symbolic
+        if (slot.face.is_fixed_pitch()) {
+            flags |= 0x01;
+        }
+        if (italic_angle != 0.0) {
+            flags |= 0x40;
+        }
 
         std::ostringstream desc;
         desc << "<< /Type /FontDescriptor /FontName /" << slot.tag_name
-             << " /Flags 32 /Ascent " << number_to_string(ascent)
+             << " /Flags " << flags
+             << " /Ascent " << number_to_string(ascent)
              << " /Descent " << number_to_string(descent)
              << " /CapHeight " << number_to_string(cap_height)
-             << " /ItalicAngle 0 /StemV 80 /FontBBox ["
+             << " /ItalicAngle " << number_to_string(italic_angle)
+             << " /StemV 80 /FontBBox ["
              << number_to_string(x_min) << ' ' << number_to_string(y_min) << ' '
              << number_to_string(x_max) << ' ' << number_to_string(y_max)
              << "] /FontFile2 " << file_obj << " 0 R >>";
@@ -525,9 +595,7 @@ bool PdfWriter::save(const std::string& path) const
 
         std::ostringstream widths;
         widths << "[ ";
-        std::vector<std::uint16_t> used = slot.used_glyphs;
-        std::sort(used.begin(), used.end());
-        used.erase(std::unique(used.begin(), used.end()), used.end());
+        std::vector<std::uint16_t> used = sorted_used_glyphs(slot.used_glyphs);
         if (used.empty()) {
             used.push_back(0);
         }
@@ -598,7 +666,8 @@ bool PdfWriter::save(const std::string& path) const
 
         std::ostringstream page_obj_body;
         page_obj_body << "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 "
-                      << page_width_pt_ << ' ' << page_height_pt_ << "] /Resources "
+                      << number_to_string(page_width_pt_) << ' '
+                      << number_to_string(page_height_pt_) << "] /Resources "
                       << resources.str()
                       << " /Contents " << content_obj << " 0 R >>";
         objects[page_obj] = page_obj_body.str();
