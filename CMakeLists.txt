@@ -124,16 +124,22 @@ if(MARK2HARU_BUILD_TESTS)
     add_executable(test_png
         tests/test_png.cpp
     )
+    add_executable(test_markdown
+        tests/test_markdown.cpp
+    )
 
     target_link_libraries(test_png PRIVATE mark2haru_core)
+    target_link_libraries(test_markdown PRIVATE mark2haru_core)
     target_include_directories(test_png PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/third_party/miniz
     )
 
     if(MSVC)
         target_compile_options(test_png PRIVATE /W4 /permissive-)
+        target_compile_options(test_markdown PRIVATE /W4 /permissive-)
     else()
         target_compile_options(test_png PRIVATE -Wall -Wextra -Wpedantic)
+        target_compile_options(test_markdown PRIVATE -Wall -Wextra -Wpedantic)
     endif()
 
     enable_testing()
@@ -175,5 +181,9 @@ if(MARK2HARU_BUILD_TESTS)
     add_test(
         NAME png_roundtrip
         COMMAND test_png
+    )
+    add_test(
+        NAME markdown_parse
+        COMMAND test_markdown
     )
 endif()
