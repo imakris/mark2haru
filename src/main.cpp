@@ -1,41 +1,20 @@
 #include <mark2haru/render.h>
 
-#include <algorithm>
-#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <sstream>
 #include <string>
-#include <vector>
 
 namespace {
 
-void print_usage(std::ostream& out)
+void print_usage()
 {
-    out << "Usage: mark2haru [options] <input.md> <output.pdf>\n"
-        << "\n"
-        << "Positional arguments:\n"
-        << "  input.md        Markdown source file. Use '-' to read from stdin.\n"
-        << "  output.pdf      Destination PDF path.\n"
-        << "\n"
-        << "Options:\n"
-        << "  --page-size NAME    A4 (default) or Letter\n"
-        << "  --margin MM         All four margins in millimetres (default 20)\n"
-        << "  --body-size PT      Body font size in points (default 10.5)\n"
-        << "  --font-dir DIR      Directory to search for bundled fonts\n"
-        << "  -v, --verbose       Print extra diagnostics on success\n"
-        << "  -h, --help          Show this message and exit\n";
+    std::cerr << "Usage: mark2haru <input.md> <output.pdf>\n";
 }
 
 bool read_file(const std::filesystem::path& path, std::string& out)
 {
-    if (path == "-") {
-        std::ostringstream ss;
-        ss << std::cin.rdbuf();
-        out = ss.str();
-        return true;
-    }
     std::ifstream in(path, std::ios::binary);
     if (!in) {
         return false;
@@ -84,14 +63,8 @@ int wmain(int argc, wchar_t** argv)
 #else
 int main(int argc, char** argv)
 {
-    ParsedArgs pa = parse_args(argc, argv);
-    if (pa.help) {
-        print_usage(std::cout);
-        return 0;
-    }
-    if (pa.parse_error) {
-        std::cerr << "mark2haru: " << pa.error << "\n";
-        print_usage(std::cerr);
+    if (argc != 3) {
+        print_usage();
         return 1;
     }
 

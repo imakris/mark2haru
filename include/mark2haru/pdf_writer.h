@@ -44,6 +44,11 @@ public:
                   const std::filesystem::path& path);
     bool save(const std::filesystem::path& path) const;
 
+    // True when the most recent page has received no drawing commands yet.
+    // Used by the renderer to skip `<!-- pagebreak -->` markers that would
+    // otherwise stack empty pages at the start of a document or after
+    // consecutive page breaks.
+    bool page_empty() const;
     double page_width_pt() const { return page_width_pt_; }
     double page_height_pt() const { return page_height_pt_; }
 

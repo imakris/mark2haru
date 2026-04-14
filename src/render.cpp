@@ -5,7 +5,6 @@
 #include <algorithm>
 #include <cstdint>
 #include <memory>
-#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -247,11 +246,9 @@ std::string list_marker(const ListBlock& lb, size_t index)
     return std::to_string(lb.start_number + static_cast<int>(index)) + ".";
 }
 
-// Split code-block text on both "\n" and "\r\n" boundaries. We cannot re-use
-// the parser's split_lines because it lives in another translation unit, but
-// the logic is intentionally the same: trailing CRs are stripped, and an
-// empty final line is only emitted when the input ends with a trailing
-// newline (which would otherwise disappear through std::getline).
+// Split a code block's body on '\n' (and trailing '\r'). Duplicates the
+// parser's split_lines rather than depending on it because the parser lives in
+// another translation unit; the logic is identical by design.
 std::vector<std::string> code_split_lines(const std::string& text)
 {
     std::vector<std::string> lines;
@@ -335,7 +332,6 @@ bool render_markdown_to_pdf(const std::string& markdown,
                             const std::filesystem::path& output_path,
                             const RenderOptions& options)
 {
-    RenderResult result;
     const auto blocks = parse_markdown(markdown);
     auto metrics = std::make_shared<MeasurementContext>(options.font_family, options.font_root_dir);
     if (!metrics->loaded()) {
@@ -533,7 +529,8 @@ bool render_markdown_to_pdf(const std::string& markdown,
             const double available =
                 options.page_height_pt - options.margin_bottom_pt - options.margin_top_pt;
             const double header_height = tb.has_header ? row_heights[0] : 0.0;
-            const size_t body_start = tb.has_header ? 1 : 0;
+
+            size_t body_start = tb.has_header ? 1 : 0;
 
             if (tb.has_header) {
                 const double min_fit = header_height
@@ -568,7 +565,8 @@ bool render_markdown_to_pdf(const std::string& markdown,
 
         if (std::holds_alternative<PageBreakBlock>(block)) {
             // Avoid stacking blank pages: if the current page has no content
-            // and the cursor is still at the top margin, the break is a no-op.
+            // and the cursor is still at the top margin, the break is a
+            // no-op.
             if (!writer.page_empty() || cursor_y > options.margin_top_pt + 0.001) {
                 new_page();
             }
@@ -576,14 +574,7 @@ bool render_markdown_to_pdf(const std::string& markdown,
         }
     }
 
-    std::string save_error;
-    if (!writer.save(output_path, &save_error)) {
-        result.ok = false;
-        result.error = save_error.empty() ? std::string("failed to write PDF") : save_error;
-        return result;
-    }
-    result.ok = true;
-    return result;
+    return writer.save(output_path);
 }
 
 } // namespace mark2haru
