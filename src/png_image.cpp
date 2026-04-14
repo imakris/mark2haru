@@ -335,7 +335,7 @@ bool Png_image::decode_png(const std::vector<std::uint8_t>& file_bytes)
                 const std::uint16_t g = bit_depth == 16 ? read_be16(cur, src_offset + (bit_depth == 16 ? 2u : 1u)) : cur[src_offset + 1];
                 const std::uint16_t b = bit_depth == 16 ? read_be16(cur, src_offset + (bit_depth == 16 ? 4u : 2u)) : cur[src_offset + 2];
                 const std::size_t dst = output_row_offset + static_cast<std::size_t>(x) * 3u;
-                m_pixels[dst] = sample_to_u8(r, bit_depth);
+                m_pixels[dst    ] = sample_to_u8(r, bit_depth);
                 m_pixels[dst + 1] = sample_to_u8(g, bit_depth);
                 m_pixels[dst + 2] = sample_to_u8(b, bit_depth);
                 if (has_rgb_key) {
@@ -355,7 +355,7 @@ bool Png_image::decode_png(const std::vector<std::uint8_t>& file_bytes)
                     return false;
                 }
                 const std::size_t dst = output_row_offset + static_cast<std::size_t>(x) * 3u;
-                m_pixels[dst] = palette[palette_offset];
+                m_pixels[dst    ] = palette[palette_offset    ];
                 m_pixels[dst + 1] = palette[palette_offset + 1];
                 m_pixels[dst + 2] = palette[palette_offset + 2];
                 if (!palette_alpha.empty()) {
