@@ -26,4 +26,13 @@ bool render_markdown_to_pdf(
     const std::filesystem::path& output_path,
     const render_options_t& options = {});
 
+// Same as above, but writes a human-readable reason into `error` when the
+// render fails (font resolution failure, I/O failure, etc.). `error` is
+// only modified on failure; on success it is left untouched.
+bool render_markdown_to_pdf(
+    const std::string& markdown,
+    const std::filesystem::path& output_path,
+    const render_options_t& options,
+    std::string& error);
+
 } // namespace mark2haru

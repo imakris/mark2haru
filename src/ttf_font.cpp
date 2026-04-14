@@ -85,7 +85,17 @@ bool True_type_font::load_from_file(const fs::path& path)
         return false;
     }
 
-    if (head->offset + 54 > m_file_bytes.size()) {
+    // Minimum tail we touch in each table. We only dereference the fields
+    // listed below, so the per-table bound is the last byte we read + 1.
+    //   head: units_per_em @ 18 (u16), bbox @ 36..43 (4*i16), magic @ 12 (u32)
+    //   hhea: ascent @ 4, descent @ 6, line_gap @ 8, num_hmetrics @ 34
+    //   maxp: num_glyphs @ 4 (u16)
+    //   cmap: num_sub_tables @ 2 (u16); each record is 8 bytes starting at 4
+    const auto in_bounds = [this](const table_record_t* rec, std::uint32_t need) {
+        return rec->offset + need <= m_file_bytes.size();
+    };
+    if (!in_bounds(head, 54) || !in_bounds(hhea, 36) || !in_bounds(maxp, 6)
+        || !in_bounds(cmap, 4)) {
         m_file_bytes.clear();
         return false;
     }

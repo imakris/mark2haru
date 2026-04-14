@@ -1,5 +1,7 @@
 #include <mark2haru/pdf_writer.h>
 
+#include "utf8_decode.h"
+
 #include <algorithm>
 #include <array>
 #include <cstdlib>
@@ -48,43 +50,6 @@ std::string hex_byte(std::uint8_t byte)
     out.push_back(digits[(byte >> 4) & 0xF]);
     out.push_back(digits[byte & 0xF]);
     return out;
-}
-
-std::vector<std::uint32_t> decode_utf8(const std::string& text)
-{
-    std::vector<std::uint32_t> cps;
-    cps.reserve(text.size());
-    for (size_t i = 0; i < text.size();) {
-        const unsigned char c = static_cast<unsigned char>(text[i]);
-        std::uint32_t cp = '?';
-        size_t advance = 1;
-        if (c < 0x80) {
-            cp = c;
-        }
-        else
-        if ((c & 0xE0) == 0xC0 && i + 1 < text.size()) {
-            cp = ((c & 0x1F) << 6) | (static_cast<unsigned char>(text[i + 1]) & 0x3F);
-            advance = 2;
-        }
-        else
-        if ((c & 0xF0) == 0xE0 && i + 2 < text.size()) {
-            cp = ((c & 0x0F) << 12)
-                | ((static_cast<unsigned char>(text[i + 1]) & 0x3F) << 6)
-                | (static_cast<unsigned char>(text[i + 2]) & 0x3F);
-            advance = 3;
-        }
-        else
-        if ((c & 0xF8) == 0xF0 && i + 3 < text.size()) {
-            cp = ((c & 0x07) << 18)
-                | ((static_cast<unsigned char>(text[i + 1]) & 0x3F) << 12)
-                | ((static_cast<unsigned char>(text[i + 2]) & 0x3F) << 6)
-                | (static_cast<unsigned char>(text[i + 3]) & 0x3F);
-            advance = 4;
-        }
-        cps.push_back(cp);
-        i += advance;
-    }
-    return cps;
 }
 
 std::string utf16be_hex_from_codepoint(std::uint32_t codepoint)
@@ -239,29 +204,40 @@ std::vector<Pdf_font> Pdf_writer::used_fonts(const std::array<loaded_font_t, 5>&
     return out;
 }
 
-std::string Pdf_writer::encode_flate(const std::string& input)
+namespace {
+
+std::string flate_encode_raw(const unsigned char* data, std::size_t size)
 {
-    if (input.empty()) {
+    if (size == 0) {
         return {};
     }
-    uLongf dest_len = compressBound(static_cast<uLong>(input.size()));
+    uLongf dest_len = compressBound(static_cast<uLong>(size));
     std::string out(dest_len, '\0');
     const int rc = compress2(
         reinterpret_cast<Bytef*>(&out[0]),
         &dest_len,
-        reinterpret_cast<const Bytef*>(input.data()),
-        static_cast<uLong>(input.size()),
+        reinterpret_cast<const Bytef*>(data),
+        static_cast<uLong>(size),
         Z_BEST_COMPRESSION);
     if (rc != Z_OK) {
-        return input;
+        return std::string(reinterpret_cast<const char*>(data), size);
     }
     out.resize(dest_len);
     return out;
 }
 
+} // namespace
+
+std::string Pdf_writer::encode_flate(const std::string& input)
+{
+    return flate_encode_raw(
+        reinterpret_cast<const unsigned char*>(input.data()),
+        input.size());
+}
+
 std::string Pdf_writer::encode_flate(const std::vector<std::uint8_t>& input)
 {
-    return encode_flate(std::string(reinterpret_cast<const char*>(input.data()), input.size()));
+    return flate_encode_raw(input.data(), input.size());
 }
 
 double Pdf_writer::measure_text_width(Pdf_font font, const std::string& text, double size_pt) const
@@ -279,7 +255,7 @@ std::string Pdf_writer::utf8_to_hex_cid_string(
 {
     std::vector<std::uint16_t> gids;
     gids.reserve(text.size());
-    for (std::uint32_t cp : decode_utf8(text)) {
+    for (std::uint32_t cp : utf8::decode(text)) {
         std::uint16_t gid = font.glyph_for_codepoint(cp);
         std::uint32_t recorded_cp = cp;
         if (gid == 0) {

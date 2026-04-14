@@ -41,8 +41,13 @@ int run(
     mark2haru::render_options_t options;
     options.font_root_dir = exe_path.parent_path();
 
-    if (!mark2haru::render_markdown_to_pdf(markdown, output_path, options)) {
-        std::cerr << "Failed to write PDF: " << output_path.string() << "\n";
+    std::string error;
+    if (!mark2haru::render_markdown_to_pdf(markdown, output_path, options, error)) {
+        std::cerr << "Failed to write PDF: " << output_path.string();
+        if (!error.empty()) {
+            std::cerr << ": " << error;
+        }
+        std::cerr << "\n";
         return 3;
     }
 

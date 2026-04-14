@@ -2,6 +2,8 @@
 
 #include <mark2haru/pdf_writer.h>
 
+#include "utf8_decode.h"
+
 #include <algorithm>
 #include <cstdint>
 #include <memory>
@@ -13,32 +15,6 @@ namespace mark2haru {
 namespace {
 
 namespace fs = std::filesystem;
-
-// Split a UTF-8 string into complete code-point units. Invalid bytes are
-// emitted as single-byte units so the rest of the string still makes it
-// through and the character-level wrap fallback does not slice a multi-byte
-// sequence in half.
-std::vector<std::string> utf8_pieces(const std::string& text)
-{
-    std::vector<std::string> out;
-    out.reserve(text.size());
-    size_t i = 0;
-    while (i < text.size()) {
-        const unsigned char c = static_cast<unsigned char>(text[i]);
-        size_t len = 1;
-        if ((c & 0x80) == 0x00) { len = 1; } else
-        if ((c & 0xE0) == 0xC0) { len = 2; } else
-        if ((c & 0xF0) == 0xE0) { len = 3; } else
-        if ((c & 0xF8) == 0xF0) { len = 4; }
-
-        if (i + len > text.size()) {
-            len = 1;
-        }
-        out.emplace_back(text.substr(i, len));
-        i += len;
-    }
-    return out;
-}
 
 Pdf_font font_for(Inline_style style)
 {
@@ -133,7 +109,7 @@ std::vector<line_t> wrap_tokens(
         // Word is wider than a full line: break it at code-point boundaries.
         std::string fragment;
         double fragment_width = 0.0;
-        for (const auto& piece : utf8_pieces(word)) {
+        for (const auto& piece : utf8::split_pieces(word)) {
             const double ch_width = measure(font_for(style), piece, size_pt);
             const double projected = current_width + fragment_width + ch_width;
             const bool any_content_on_line = current_width > 0.0 || fragment_width > 0.0;
@@ -297,16 +273,23 @@ std::vector<line_t> code_lines(
 bool render_markdown_to_pdf(
     const std::string& markdown,
     const fs::path& output_path,
-    const render_options_t& options)
+    const render_options_t& options,
+    std::string& error)
 {
     const auto blocks = parse_markdown(markdown);
     auto metrics = std::make_shared<Measurement_context>(options.font_family, options.font_root_dir);
     if (!metrics->loaded()) {
+        error = metrics->error().empty()
+            ? std::string("Failed to load fonts")
+            : metrics->error();
         return false;
     }
 
     Pdf_writer writer(options.page_width_pt, options.page_height_pt, metrics);
     if (!writer.fonts_loaded()) {
+        error = writer.font_error().empty()
+            ? std::string("PDF writer reports fonts not loaded")
+            : writer.font_error();
         return false;
     }
 
@@ -473,7 +456,7 @@ bool render_markdown_to_pdf(
                     for (const auto& line : lines) {
                         double text_x = x + cell_pad;
                         for (const auto& [text, style] : line.spans) {
-                            const Pdf_font font = style == Inline_style::CODE ? Pdf_font::MONO : font_for(style);
+                            const Pdf_font font = font_for(style);
                             writer.draw_text(text_x, cell_y, cell_size, font, text);
                             text_x += measure(font, text, cell_size);
                         }
@@ -528,7 +511,20 @@ bool render_markdown_to_pdf(
         }
     }
 
-    return writer.save(output_path);
+    if (!writer.save(output_path)) {
+        error = "Failed to write PDF file: " + output_path.string();
+        return false;
+    }
+    return true;
+}
+
+bool render_markdown_to_pdf(
+    const std::string& markdown,
+    const fs::path& output_path,
+    const render_options_t& options)
+{
+    std::string scratch;
+    return render_markdown_to_pdf(markdown, output_path, options, scratch);
 }
 
 } // namespace mark2haru

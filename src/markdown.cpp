@@ -498,10 +498,16 @@ std::vector<block_t> parse_markdown(const std::string& input)
                         && !lines[i].empty()
                         && (lines[i][0] == ' ' || lines[i][0] == '\t'))
                     {
-                        if (!item_text.empty()) {
-                            item_text.push_back(' ');
+                        // The indentation on a continuation line is a
+                        // structural marker, not content: strip it before
+                        // joining with a single space.
+                        const std::string continuation = trim(item_line.content);
+                        if (!continuation.empty()) {
+                            if (!item_text.empty()) {
+                                item_text.push_back(' ');
+                            }
+                            item_text += continuation;
                         }
-                        item_text += item_line.content;
                         ++i;
                         continue;
                     }

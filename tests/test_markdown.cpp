@@ -8,10 +8,14 @@ namespace {
 
 using mark2haru::Inline_style;
 using mark2haru::block_t;
+using mark2haru::code_block_t;
 using mark2haru::heading_block_t;
 using mark2haru::inline_run_t;
+using mark2haru::list_block_t;
+using mark2haru::page_break_block_t;
 using mark2haru::paragraph_block_t;
 using mark2haru::parse_markdown;
+using mark2haru::table_block_t;
 
 const paragraph_block_t* expect_single_paragraph(const std::vector<block_t>& blocks)
 {
@@ -119,6 +123,125 @@ int main()
         }
         if (heading->level != 1 || !expect_text_equals(heading->runs, "Heading")) {
             return 13;
+        }
+    }
+
+    {
+        // Bulleted list with a continuation line indented by a single space.
+        const auto blocks = parse_markdown(
+            "- first item\n"
+            "  continued\n"
+            "- second item\n");
+        if (blocks.size() != 1) {
+            std::fprintf(stderr, "expected 1 list block, got %zu\n", blocks.size());
+            return 14;
+        }
+        const auto* list = std::get_if<list_block_t>(&blocks[0]);
+        if (!list || list->ordered || list->items.size() != 2) {
+            std::fprintf(stderr, "unexpected list shape\n");
+            return 15;
+        }
+        if (!expect_text_equals(list->items[0].runs, "first item continued")) {
+            return 16;
+        }
+        if (!expect_text_equals(list->items[1].runs, "second item")) {
+            return 17;
+        }
+    }
+
+    {
+        // Ordered list starting at a non-1 number preserves the starting value
+        // and counts each item correctly.
+        const auto blocks = parse_markdown(
+            "3. three\n"
+            "4. four\n");
+        if (blocks.size() != 1) {
+            std::fprintf(stderr, "expected 1 ordered list block, got %zu\n", blocks.size());
+            return 18;
+        }
+        const auto* list = std::get_if<list_block_t>(&blocks[0]);
+        if (!list || !list->ordered || list->start_number != 3 || list->items.size() != 2) {
+            std::fprintf(stderr, "unexpected ordered list shape\n");
+            return 19;
+        }
+        if (!expect_text_equals(list->items[0].runs, "three")) {
+            return 20;
+        }
+    }
+
+    {
+        // Fenced code block preserves interior whitespace and does not
+        // parse inline markup inside the body.
+        const auto blocks = parse_markdown(
+            "```text\n"
+            "line one\n"
+            "  *not italic*\n"
+            "```\n");
+        if (blocks.size() != 1) {
+            std::fprintf(stderr, "expected 1 code block, got %zu\n", blocks.size());
+            return 21;
+        }
+        const auto* code = std::get_if<code_block_t>(&blocks[0]);
+        if (!code) {
+            std::fprintf(stderr, "expected code block\n");
+            return 22;
+        }
+        if (code->language != "text") {
+            std::fprintf(stderr, "unexpected code language: '%s'\n", code->language.c_str());
+            return 23;
+        }
+        if (code->text != "line one\n  *not italic*") {
+            std::fprintf(stderr, "unexpected code body: '%s'\n", code->text.c_str());
+            return 24;
+        }
+    }
+
+    {
+        // A pipe table with a header row and two body rows parses into a
+        // table block with has_header set.
+        const auto blocks = parse_markdown(
+            "| Item | State |\n"
+            "| --- | --- |\n"
+            "| A | ok |\n"
+            "| B | fail |\n");
+        if (blocks.size() != 1) {
+            std::fprintf(stderr, "expected 1 table block, got %zu\n", blocks.size());
+            return 25;
+        }
+        const auto* table = std::get_if<table_block_t>(&blocks[0]);
+        if (!table || !table->has_header || table->rows.size() != 3) {
+            std::fprintf(stderr, "unexpected table shape\n");
+            return 26;
+        }
+        if (table->rows[0].cells.size() != 2
+            || table->rows[1].cells.size() != 2
+            || table->rows[2].cells.size() != 2) {
+            std::fprintf(stderr, "unexpected table column shape\n");
+            return 27;
+        }
+        if (!expect_text_equals(table->rows[0].cells[0].runs, "Item")
+            || !expect_text_equals(table->rows[2].cells[1].runs, "fail")) {
+            return 28;
+        }
+    }
+
+    {
+        // Explicit page break splits the document into separate blocks.
+        const auto blocks = parse_markdown(
+            "before\n"
+            "\n"
+            "<!-- pagebreak -->\n"
+            "\n"
+            "after\n");
+        if (blocks.size() != 3) {
+            std::fprintf(stderr, "expected 3 blocks for page-break case, got %zu\n", blocks.size());
+            return 29;
+        }
+        if (!std::get_if<paragraph_block_t>(&blocks[0])
+            || !std::get_if<page_break_block_t>(&blocks[1])
+            || !std::get_if<paragraph_block_t>(&blocks[2])) {
+            std::fprintf(stderr, "unexpected block shape around page break\n");
+            return 30;
         }
     }
 
