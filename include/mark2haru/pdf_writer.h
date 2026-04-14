@@ -1,7 +1,7 @@
 #pragma once
 
-#include "font_context.h"
-#include "png_image.h"
+#include <mark2haru/font_context.h>
+#include <mark2haru/png_image.h>
 
 #include <array>
 #include <filesystem>
