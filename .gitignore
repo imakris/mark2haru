@@ -1,0 +1,9 @@
+build/
+build*/
+*.user
+*.suo
+*.vcxproj.user
+*.obj
+*.pdb
+*.ilk
+*.log
