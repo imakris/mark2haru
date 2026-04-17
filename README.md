@@ -1,5 +1,7 @@
 # mark2haru
 
+[![Build and test](https://github.com/imakris/mark2haru/actions/workflows/build-and-test.yml/badge.svg)](https://github.com/imakris/mark2haru/actions/workflows/build-and-test.yml)
+
 `mark2haru` is a small standalone Markdown-to-PDF renderer for neutral brief-style documents.
 It is derived from the Markdown/PDF path used in `briefutil`, but it deliberately removes
 letter-generation semantics, profile handling, Qt UI code, and branding.
@@ -56,6 +58,14 @@ that reason to the caller.
 PDF content streams, font streams, and Unicode CMaps are Flate-compressed when compression makes
 the object smaller. The project uses the lightweight bundled `miniz` implementation, so it does
 not depend on system zlib.
+
+## CI Status
+
+| Platform | Build + test | Consumer install smoke | Notes |
+| :-- | :--: | :--: | :-- |
+| Linux | GitHub Actions | GitHub Actions | Configures with CMake, builds in Release, runs `ctest`, and validates an installed downstream consumer. |
+| macOS | GitHub Actions | GitHub Actions | Configures with CMake, builds in Release, runs `ctest`, and validates an installed downstream consumer. |
+| Windows | GitHub Actions | GitHub Actions | Uses the same CMake/CTest flow with the Release config on the hosted MSVC runner. |
 
 ## Build
 

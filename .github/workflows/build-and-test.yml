@@ -1,0 +1,74 @@
+name: Build and test
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+          - macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: >
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DMARK2HARU_BUILD_CLI=ON
+          -DMARK2HARU_BUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Run tests (Windows)
+        if: runner.os == 'Windows'
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Run tests (Non-Windows)
+        if: runner.os != 'Windows'
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Install and test downstream consumer
+        shell: bash
+        run: |
+          cmake --install build --prefix "$PWD/build/_install" --config Release
+          mkdir -p build/_consumer
+          cat > build/_consumer/CMakeLists.txt <<'EOF'
+          cmake_minimum_required(VERSION 3.20)
+          project(mark2haru_consumer_smoke LANGUAGES CXX)
+          find_package(mark2haru CONFIG REQUIRED)
+          add_executable(consumer_smoke consumer.cpp)
+          target_link_libraries(consumer_smoke PRIVATE mark2haru::mark2haru)
+          EOF
+          cat > build/_consumer/consumer.cpp <<'EOF'
+          #include <mark2haru/mark2haru.h>
+          int main() {
+              mark2haru::render_options_t options;
+              return options.page_width_pt > 0.0 ? 0 : 1;
+          }
+          EOF
+          cmake -S build/_consumer -B build/_consumer/_build \
+            -DCMAKE_PREFIX_PATH="$PWD/build/_install" \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/_consumer/_build --config Release
+          if [ -x ./build/_consumer/_build/consumer_smoke ]; then
+            ./build/_consumer/_build/consumer_smoke
+          else
+            ./build/_consumer/_build/Release/consumer_smoke.exe
+          fi
