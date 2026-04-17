@@ -26,7 +26,6 @@ compression.
 
 - Markdown image syntax
 - full CommonMark compatibility
-- letter templates, sender profiles, or UI workflow
 - font subsetting (see below)
 
 The renderer embeds TrueType fonts into the PDF and emits Unicode text using `Identity-H`
