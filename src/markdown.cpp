@@ -3,8 +3,10 @@
 #include "utf8_decode.h"
 
 #include <cctype>
+#include <charconv>
 #include <cstdlib>
 #include <string_view>
+#include <system_error>
 
 namespace mark2haru {
 namespace {
@@ -318,11 +320,20 @@ classified_line_t classify_line(const std::string& line)
         ++pos;
     }
     if (pos > 0 && pos + 1 < trimmed.size() && trimmed[pos] == '.' && trimmed[pos + 1] == ' ') {
+        // std::atoi is undefined on overflow; std::from_chars reports it
+        // explicitly. On overflow or any other failure we fall back to 1
+        // (the list still renders, the start number is just clamped).
+        int start = 1;
+        const char* begin = trimmed.data();
+        const auto [_, ec] = std::from_chars(begin, begin + pos, start);
+        if (ec != std::errc{}) {
+            start = 1;
+        }
         return {
             classified_line_t::Type::ORDERED_ITEM,
             trim(trimmed.substr(pos + 2)),
             0,
-            std::atoi(trimmed.substr(0, pos).c_str())
+            start
         };
     }
 

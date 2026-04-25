@@ -179,6 +179,13 @@ double total_height(const std::vector<line_t>& lines)
     return h;
 }
 
+// Standard "overloaded" idiom to combine a set of single-type lambdas
+// into one callable that std::visit can dispatch on. Adding a new block
+// alternative without a matching lambda fails to compile, which is the
+// whole point of using std::visit here.
+template <class... Ts> struct overloaded : Ts... { using Ts::operator()...; };
+template <class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
+
 struct heading_metrics_t {
     double size_factor;
     double space_before_factor;
@@ -209,7 +216,12 @@ std::string list_marker(const list_block_t& lb, size_t index)
         // U+2022 BULLET
         return "\xe2\x80\xa2";
     }
-    return std::to_string(lb.start_number + static_cast<int>(index)) + ".";
+    // Compute the marker number in 64-bit signed arithmetic so a very
+    // large start_number plus a very large index doesn't overflow int.
+    const std::int64_t value =
+        static_cast<std::int64_t>(lb.start_number) +
+        static_cast<std::int64_t>(index);
+    return std::to_string(value) + ".";
 }
 
 template <class MeasureFn>
@@ -290,196 +302,196 @@ bool render_markdown_to_pdf(
         }
     };
 
-    for (const auto& block : blocks) {
-        if (std::holds_alternative<paragraph_block_t>(block)) {
-            const auto& pb = std::get<paragraph_block_t>(block);
-            const auto lines = wrap_runs(pb.runs, content_width, options.body_size_pt,
+    auto on_paragraph = [&](const paragraph_block_t& pb) {
+        const auto lines = wrap_runs(pb.runs, content_width, options.body_size_pt,
+                                     options.line_spacing, measure);
+        const double height = total_height(lines);
+        ensure_space(height + options.body_size_pt * 0.25);
+        for (const auto& line : lines) {
+            draw_line(line, options.body_size_pt, options.margin_left_pt);
+            cursor_y += line.height_pt;
+        }
+        cursor_y += options.body_size_pt * 0.35;
+    };
+
+    auto on_heading = [&](const heading_block_t& hb) {
+        const auto& hm = heading_metrics(hb.level);
+        const double size = options.body_size_pt * hm.size_factor;
+        const double space_before = size * hm.space_before_factor;
+        const double space_after = size * hm.space_after_factor;
+        const auto lines = wrap_runs(hb.runs, content_width, size, 1.15, measure);
+        const double height = total_height(lines);
+        ensure_space(space_before + height + space_after);
+        cursor_y += space_before;
+        for (const auto& line : lines) {
+            draw_line(line, size, options.margin_left_pt);
+            cursor_y += line.height_pt;
+        }
+        cursor_y += space_after;
+    };
+
+    auto on_list = [&](const list_block_t& lb) {
+        for (size_t i = 0; i < lb.items.size(); ++i) {
+            const std::string marker = list_marker(lb, i);
+            const double marker_width = measure(Pdf_font::REGULAR, marker, options.body_size_pt);
+            const double gap = options.body_size_pt * 0.55;
+            const double item_left = options.margin_left_pt + marker_width + gap;
+            const double item_width = content_width - marker_width - gap;
+            const auto lines = wrap_runs(lb.items[i].runs, item_width, options.body_size_pt,
                                          options.line_spacing, measure);
             const double height = total_height(lines);
-            ensure_space(height + options.body_size_pt * 0.25);
+            ensure_space(height + options.body_size_pt * 0.2);
+            writer.draw_text(
+                options.margin_left_pt,
+                cursor_y,
+                options.body_size_pt,
+                Pdf_font::REGULAR,
+                marker);
             for (const auto& line : lines) {
-                draw_line(line, options.body_size_pt, options.margin_left_pt);
+                draw_line(line, options.body_size_pt, item_left);
                 cursor_y += line.height_pt;
-            }
-            cursor_y += options.body_size_pt * 0.35;
-            continue;
-        }
-
-        if (std::holds_alternative<heading_block_t>(block)) {
-            const auto& hb = std::get<heading_block_t>(block);
-            const auto& metrics = heading_metrics(hb.level);
-            const double size = options.body_size_pt * metrics.size_factor;
-            const double space_before = size * metrics.space_before_factor;
-            const double space_after = size * metrics.space_after_factor;
-            const auto lines = wrap_runs(hb.runs, content_width, size, 1.15, measure);
-            const double height = total_height(lines);
-            ensure_space(space_before + height + space_after);
-            cursor_y += space_before;
-            for (const auto& line : lines) {
-                draw_line(line, size, options.margin_left_pt);
-                cursor_y += line.height_pt;
-            }
-            cursor_y += space_after;
-            continue;
-        }
-
-        if (std::holds_alternative<list_block_t>(block)) {
-            const auto& lb = std::get<list_block_t>(block);
-            for (size_t i = 0; i < lb.items.size(); ++i) {
-                const std::string marker = list_marker(lb, i);
-                const double marker_width = measure(Pdf_font::REGULAR, marker, options.body_size_pt);
-                const double gap = options.body_size_pt * 0.55;
-                const double item_left = options.margin_left_pt + marker_width + gap;
-                const double item_width = content_width - marker_width - gap;
-                const auto lines = wrap_runs(lb.items[i].runs, item_width, options.body_size_pt,
-                                             options.line_spacing, measure);
-                const double height = total_height(lines);
-                ensure_space(height + options.body_size_pt * 0.2);
-                writer.draw_text(
-                    options.margin_left_pt,
-                    cursor_y,
-                    options.body_size_pt,
-                    Pdf_font::REGULAR,
-                    marker);
-                for (const auto& line : lines) {
-                    draw_line(line, options.body_size_pt, item_left);
-                    cursor_y += line.height_pt;
-                }
-                cursor_y += options.body_size_pt * 0.15;
             }
             cursor_y += options.body_size_pt * 0.15;
-            continue;
+        }
+        cursor_y += options.body_size_pt * 0.15;
+    };
+
+    auto on_code = [&](const code_block_t& cb) {
+        const double size = options.body_size_pt * 0.92;
+        const double pad = options.body_size_pt * 0.45;
+        const double available_width = content_width - pad * 2.0;
+        const auto lines = code_lines(cb.text, available_width, size, 1.25, measure);
+        const double height = total_height(lines) + pad * 2.0;
+        ensure_space(height + options.body_size_pt * 0.2);
+        writer.fill_rect(options.margin_left_pt, cursor_y, content_width, height,
+                         code_block_fill);
+        double y = cursor_y + pad;
+        for (const auto& line : lines) {
+            double x = options.margin_left_pt + pad;
+            for (const auto& [text, style] : line.spans) {
+                writer.draw_text(x, y, size, Pdf_font::MONO, text);
+                x += measure(Pdf_font::MONO, text, size);
+            }
+            y += line.height_pt;
+        }
+        writer.stroke_rect(options.margin_left_pt, cursor_y, content_width, height,
+                           default_stroke, border_line_width);
+        cursor_y += height + options.body_size_pt * 0.25;
+    };
+
+    auto on_table = [&](const table_block_t& tb) {
+        if (tb.rows.empty()) {
+            return;
         }
 
-        if (std::holds_alternative<code_block_t>(block)) {
-            const auto& cb = std::get<code_block_t>(block);
-            const double size = options.body_size_pt * 0.92;
-            const double pad = options.body_size_pt * 0.45;
-            const double available_width = content_width - pad * 2.0;
-            const auto lines = code_lines(cb.text, available_width, size, 1.25, measure);
-            const double height = total_height(lines) + pad * 2.0;
-            ensure_space(height + options.body_size_pt * 0.2);
-            writer.fill_rect(options.margin_left_pt, cursor_y, content_width, height,
-                             code_block_fill);
-            double y = cursor_y + pad;
-            for (const auto& line : lines) {
-                double x = options.margin_left_pt + pad;
-                for (const auto& [text, style] : line.spans) {
-                    writer.draw_text(x, y, size, Pdf_font::MONO, text);
-                    x += measure(Pdf_font::MONO, text, size);
-                }
-                y += line.height_pt;
-            }
-            writer.stroke_rect(options.margin_left_pt, cursor_y, content_width, height,
-                               default_stroke, border_line_width);
-            cursor_y += height + options.body_size_pt * 0.25;
-            continue;
+        size_t column_count = 0;
+        for (const auto& row : tb.rows) {
+            column_count = std::max(column_count, row.cells.size());
+        }
+        if (column_count == 0) {
+            return;
         }
 
-        if (std::holds_alternative<table_block_t>(block)) {
-            const auto& tb = std::get<table_block_t>(block);
-            if (tb.rows.empty()) {
-                continue;
+        const double cell_pad = options.body_size_pt * 0.35;
+        const double cell_size = options.body_size_pt * 0.95;
+        const double col_width = content_width / static_cast<double>(column_count);
+        const double inner_width = col_width - cell_pad * 2.0;
+        std::vector<std::vector<std::vector<line_t>>> cell_lines(tb.rows.size());
+        std::vector<double> row_heights(tb.rows.size(), 0.0);
+        for (size_t r = 0; r < tb.rows.size(); ++r) {
+            cell_lines[r].resize(column_count);
+            const auto& row = tb.rows[r];
+            double row_height = 0.0;
+            for (size_t col = 0; col < column_count; ++col) {
+                const std::vector<inline_run_t> empty;
+                const auto& runs = col < row.cells.size() ? row.cells[col].runs : empty;
+                cell_lines[r][col] = wrap_runs(runs, inner_width, cell_size, 1.22, measure);
+                const double cell_height = total_height(cell_lines[r][col]) + cell_pad * 2.0;
+                row_height = std::max(row_height, cell_height);
+            }
+            row_heights[r] = row_height;
+        }
+
+        auto draw_row = [&](size_t row_idx) {
+            const double row_height = row_heights[row_idx];
+            const bool header = tb.has_header && row_idx == 0;
+            if (header) {
+                writer.fill_rect(options.margin_left_pt, cursor_y, content_width, row_height,
+                                 table_header_fill);
             }
 
-            size_t column_count = 0;
-            for (const auto& row : tb.rows) {
-                column_count = std::max(column_count, row.cells.size());
-            }
-            if (column_count == 0) {
-                continue;
-            }
-
-            const double cell_pad = options.body_size_pt * 0.35;
-            const double cell_size = options.body_size_pt * 0.95;
-            const double col_width = content_width / static_cast<double>(column_count);
-            const double inner_width = col_width - cell_pad * 2.0;
-            std::vector<std::vector<std::vector<line_t>>> cell_lines(tb.rows.size());
-            std::vector<double> row_heights(tb.rows.size(), 0.0);
-            for (size_t r = 0; r < tb.rows.size(); ++r) {
-                cell_lines[r].resize(column_count);
-                const auto& row = tb.rows[r];
-                double row_height = 0.0;
-                for (size_t col = 0; col < column_count; ++col) {
-                    const std::vector<inline_run_t> empty;
-                    const auto& runs = col < row.cells.size() ? row.cells[col].runs : empty;
-                    cell_lines[r][col] = wrap_runs(runs, inner_width, cell_size, 1.22, measure);
-                    const double cell_height = total_height(cell_lines[r][col]) + cell_pad * 2.0;
-                    row_height = std::max(row_height, cell_height);
-                }
-                row_heights[r] = row_height;
-            }
-
-            auto draw_row = [&](size_t row_idx) {
-                const double row_height = row_heights[row_idx];
-                const bool header = tb.has_header && row_idx == 0;
-                if (header) {
-                    writer.fill_rect(options.margin_left_pt, cursor_y, content_width, row_height,
-                                     table_header_fill);
-                }
-
-                double x = options.margin_left_pt;
-                for (size_t col = 0; col < column_count; ++col) {
-                    writer.stroke_rect(x, cursor_y, col_width, row_height,
-                                       default_stroke, border_line_width);
-                    const auto& lines = cell_lines[row_idx][col];
-                    double cell_y = cursor_y + cell_pad;
-                    for (const auto& line : lines) {
-                        double text_x = x + cell_pad;
-                        for (const auto& [text, style] : line.spans) {
-                            const Pdf_font font = font_for(style);
-                            writer.draw_text(text_x, cell_y, cell_size, font, text);
-                            text_x += measure(font, text, cell_size);
-                        }
-                        cell_y += line.height_pt;
+            double x = options.margin_left_pt;
+            for (size_t col = 0; col < column_count; ++col) {
+                writer.stroke_rect(x, cursor_y, col_width, row_height,
+                                   default_stroke, border_line_width);
+                const auto& lines = cell_lines[row_idx][col];
+                double cell_y = cursor_y + cell_pad;
+                for (const auto& line : lines) {
+                    double text_x = x + cell_pad;
+                    for (const auto& [text, style] : line.spans) {
+                        const Pdf_font font = font_for(style);
+                        writer.draw_text(text_x, cell_y, cell_size, font, text);
+                        text_x += measure(font, text, cell_size);
                     }
-                    x += col_width;
+                    cell_y += line.height_pt;
                 }
-                cursor_y += row_height;
-            };
-
-            const double available =
-                options.page_height_pt - options.margin_bottom_pt - options.margin_top_pt;
-            const double header_height = tb.has_header ? row_heights[0] : 0.0;
-
-            size_t body_start = tb.has_header ? 1 : 0;
-
-            if (tb.has_header) {
-                const double min_fit = header_height
-                    + (body_start < tb.rows.size() ? row_heights[body_start] : 0.0);
-                ensure_space(min_fit);
-                draw_row(0);
+                x += col_width;
             }
-            else {
-                ensure_space(row_heights[0]);
-            }
+            cursor_y += row_height;
+        };
 
-            for (size_t row_idx = body_start; row_idx < tb.rows.size(); ++row_idx) {
-                const double row_height = row_heights[row_idx];
-                const bool fits_on_page =
-                    cursor_y + row_height <= options.page_height_pt - options.margin_bottom_pt;
-                if (!fits_on_page) {
-                    // If the row is taller than a full page there's nothing
-                    // better we can do than draw it where it lands; otherwise
-                    // start a fresh page and repeat the header.
-                    const bool row_exceeds_page = row_height > available;
-                    if (!row_exceeds_page) {
-                        new_page();
-                        if (tb.has_header) {
-                            draw_row(0);
-                        }
+        const double available =
+            options.page_height_pt - options.margin_bottom_pt - options.margin_top_pt;
+        const double header_height = tb.has_header ? row_heights[0] : 0.0;
+
+        size_t body_start = tb.has_header ? 1 : 0;
+
+        if (tb.has_header) {
+            const double min_fit = header_height
+                + (body_start < tb.rows.size() ? row_heights[body_start] : 0.0);
+            ensure_space(min_fit);
+            draw_row(0);
+        }
+        else {
+            ensure_space(row_heights[0]);
+        }
+
+        for (size_t row_idx = body_start; row_idx < tb.rows.size(); ++row_idx) {
+            const double row_height = row_heights[row_idx];
+            const bool fits_on_page =
+                cursor_y + row_height <= options.page_height_pt - options.margin_bottom_pt;
+            if (!fits_on_page) {
+                // If the row is taller than a full page there's nothing
+                // better we can do than draw it where it lands; otherwise
+                // start a fresh page and repeat the header.
+                const bool row_exceeds_page = row_height > available;
+                if (!row_exceeds_page) {
+                    new_page();
+                    if (tb.has_header) {
+                        draw_row(0);
                     }
                 }
-                draw_row(row_idx);
             }
-            cursor_y += options.body_size_pt * 0.25;
-            continue;
+            draw_row(row_idx);
         }
+        cursor_y += options.body_size_pt * 0.25;
+    };
 
-        if (std::holds_alternative<page_break_block_t>(block)) {
-            new_page();
-            continue;
-        }
+    auto on_page_break = [&](const page_break_block_t&) {
+        new_page();
+    };
+
+    for (const auto& block : blocks) {
+        std::visit(
+            overloaded{
+                on_paragraph,
+                on_heading,
+                on_list,
+                on_code,
+                on_table,
+                on_page_break,
+            },
+            block);
     }
 
     if (!writer.save(output_path)) {
