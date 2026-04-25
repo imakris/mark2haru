@@ -1,25 +1,13 @@
 #include <mark2haru/ttf_font.h>
 
+#include "utf8_decode.h"
+
 #include <algorithm>
-#include <fstream>
-#include <iterator>
-#include <limits>
 
 namespace mark2haru {
+
 namespace {
-
 namespace fs = std::filesystem;
-
-bool read_file_bytes(const fs::path& path, std::vector<std::uint8_t>& out)
-{
-    std::ifstream in(path, std::ios::binary);
-    if (!in) {
-        return false;
-    }
-    out.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
-    return !out.empty();
-}
-
 } // namespace
 
 std::uint16_t True_type_font::read_u16(const std::vector<std::uint8_t>& data, std::uint32_t offset)
@@ -323,16 +311,6 @@ std::uint16_t True_type_font::advance_width_for_gid(std::uint16_t gid) const
         return m_advance_widths[gid];
     }
     return m_advance_widths.back();
-}
-
-double True_type_font::advance_width_pt(std::uint32_t codepoint, double size_pt) const
-{
-    const std::uint16_t gid = glyph_for_codepoint(codepoint);
-    const std::uint16_t adv = advance_width_for_gid(gid);
-    if (m_units_per_em == 0) {
-        return 0.0;
-    }
-    return static_cast<double>(adv) * size_pt / static_cast<double>(m_units_per_em);
 }
 
 } // namespace mark2haru

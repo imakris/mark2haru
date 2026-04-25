@@ -28,10 +28,6 @@ public:
         double page_width_pt,
         double page_height_pt,
         std::shared_ptr<const Measurement_context> metrics);
-    Pdf_writer(
-        double page_width_pt,
-        double page_height_pt,
-        const std::filesystem::path& font_root = {});
 
     bool fonts_loaded() const;
     const std::string& font_error() const { return m_font_error; }
@@ -40,10 +36,8 @@ public:
     void set_stroke_color(const color_t& color);
     void set_fill_color(const color_t& color);
     void set_line_width(double width_pt);
-    void stroke_line(double x1_pt, double y1_top_pt, double x2_pt, double y2_top_pt);
     void stroke_rect(double x_pt, double y_top_pt, double w_pt, double h_pt);
     void fill_rect(double x_pt, double y_top_pt, double w_pt, double h_pt);
-    double measure_text_width(Pdf_font font, const std::string& text, double size_pt) const;
     void draw_text(
         double x_pt,
         double y_top_pt,
@@ -101,8 +95,6 @@ private:
         const std::string& text);
     static std::string make_to_unicode_cmap(const loaded_font_t& font);
     static std::vector<Pdf_font> used_fonts(const std::array<loaded_font_t, 5>& fonts);
-    static std::string encode_flate(const std::string& input);
-    static std::string encode_flate(const std::vector<std::uint8_t>& input);
 };
 
 } // namespace mark2haru

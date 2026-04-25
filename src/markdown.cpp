@@ -1,8 +1,9 @@
 #include <mark2haru/markdown.h>
 
+#include "utf8_decode.h"
+
 #include <cctype>
 #include <cstdlib>
-#include <iterator>
 #include <string_view>
 
 namespace mark2haru {
@@ -35,30 +36,6 @@ std::string rtrim(const std::string& s)
         return {};
     }
     return s.substr(0, end + 1);
-}
-
-std::vector<std::string> split_lines(const std::string& text)
-{
-    std::vector<std::string> lines;
-    size_t pos = 0;
-    while (pos <= text.size()) {
-        const size_t nl = text.find('\n', pos);
-        if (nl == std::string::npos) {
-            auto line = text.substr(pos);
-            if (!line.empty() && line.back() == '\r') {
-                line.pop_back();
-            }
-            lines.push_back(std::move(line));
-            break;
-        }
-        auto line = text.substr(pos, nl - pos);
-        if (!line.empty() && line.back() == '\r') {
-            line.pop_back();
-        }
-        lines.push_back(std::move(line));
-        pos = nl + 1;
-    }
-    return lines;
 }
 
 // Find the next asterisk run whose length is exactly `run_len`, skipping runs
@@ -180,6 +157,44 @@ std::vector<inline_run_t> parse_inline(const std::string& text)
         return pos == 0 || !is_word_char(text[pos - 1]);
     };
 
+    // Emphasis greedily prefers the longest delimiter run (***, **, *) so
+    // nested markup like ***bold italic*** binds correctly.
+    auto try_emphasis = [&](char delim, auto&& find_close) -> bool {
+        for (size_t len : { size_t{3}, size_t{2}, size_t{1} }) {
+            // For a single-char run, refuse if it's actually the start of
+            // a longer run (avoids `**bold**` opening as `*` italic).
+            if (len == 1 && i + 1 < text.size() && text[i + 1] == delim) {
+                continue;
+            }
+            if (i + len > text.size()) {
+                continue;
+            }
+            bool prefix_ok = true;
+            for (size_t k = 0; k < len; ++k) {
+                if (text[i + k] != delim) {
+                    prefix_ok = false;
+                    break;
+                }
+            }
+            if (!prefix_ok) {
+                continue;
+            }
+            const size_t close = find_close(i + len, len);
+            if (close == std::string::npos) {
+                continue;
+            }
+            const Inline_style style =
+                len == 3 ? Inline_style::BOLD_ITALIC :
+                len == 2 ? Inline_style::BOLD :
+                           Inline_style::ITALIC;
+            flush();
+            runs.push_back({ text.substr(i + len, close - i - len), style });
+            i = close + len;
+            return true;
+        }
+        return false;
+    };
+
     while (i < text.size()) {
         if (text[i] == '\\' && i + 1 < text.size() && is_escapable(text[i + 1])) {
             current.push_back(text[i + 1]);
@@ -187,64 +202,18 @@ std::vector<inline_run_t> parse_inline(const std::string& text)
             continue;
         }
 
-        if (starts_with(text, i, "***")) {
-            const size_t close = find_asterisk_run(text, i + 3, 3);
-            if (close != std::string::npos) {
-                flush();
-                runs.push_back({ text.substr(i + 3, close - i - 3), Inline_style::BOLD_ITALIC });
-                i = close + 3;
-                continue;
-            }
+        if (text[i] == '*'
+            && try_emphasis('*', [&](size_t s, size_t l) {
+                return find_asterisk_run(text, s, l);
+            })) {
+            continue;
         }
 
-        if (starts_with(text, i, "**")) {
-            const size_t close = find_asterisk_run(text, i + 2, 2);
-            if (close != std::string::npos) {
-                flush();
-                runs.push_back({ text.substr(i + 2, close - i - 2), Inline_style::BOLD });
-                i = close + 2;
-                continue;
-            }
-        }
-
-        if (text[i] == '*' && !starts_with(text, i, "**")) {
-            const size_t close = find_asterisk_run(text, i + 1, 1);
-            if (close != std::string::npos) {
-                flush();
-                runs.push_back({ text.substr(i + 1, close - i - 1), Inline_style::ITALIC });
-                i = close + 1;
-                continue;
-            }
-        }
-
-        if (starts_with(text, i, "___") && can_open_underscore(i)) {
-            const size_t close = find_closing_underscore(text, i + 3, 3);
-            if (close != std::string::npos) {
-                flush();
-                runs.push_back({ text.substr(i + 3, close - i - 3), Inline_style::BOLD_ITALIC });
-                i = close + 3;
-                continue;
-            }
-        }
-
-        if (starts_with(text, i, "__") && can_open_underscore(i)) {
-            const size_t close = find_closing_underscore(text, i + 2, 2);
-            if (close != std::string::npos) {
-                flush();
-                runs.push_back({ text.substr(i + 2, close - i - 2), Inline_style::BOLD });
-                i = close + 2;
-                continue;
-            }
-        }
-
-        if (text[i] == '_' && !starts_with(text, i, "__") && can_open_underscore(i)) {
-            const size_t close = find_closing_underscore(text, i + 1, 1);
-            if (close != std::string::npos) {
-                flush();
-                runs.push_back({ text.substr(i + 1, close - i - 1), Inline_style::ITALIC });
-                i = close + 1;
-                continue;
-            }
+        if (text[i] == '_' && can_open_underscore(i)
+            && try_emphasis('_', [&](size_t s, size_t l) {
+                return find_closing_underscore(text, s, l);
+            })) {
+            continue;
         }
 
         if (text[i] == '`') {

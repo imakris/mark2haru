@@ -1,14 +1,13 @@
 #include <mark2haru/png_image.h>
 
 #include "miniz.h"
+#include "utf8_decode.h"
 
 #include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
-#include <fstream>
-#include <iterator>
 
 namespace mark2haru {
 namespace {
@@ -27,16 +26,6 @@ std::uint16_t read_be16(const std::vector<std::uint8_t>& bytes, std::size_t offs
 {
     return static_cast<std::uint16_t>((static_cast<std::uint16_t>(bytes[offset]) << 8)
         | static_cast<std::uint16_t>(bytes[offset + 1]));
-}
-
-bool read_file_bytes(const fs::path& path, std::vector<std::uint8_t>& out)
-{
-    std::ifstream in(path, std::ios::binary);
-    if (!in) {
-        return false;
-    }
-    out.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
-    return !out.empty();
 }
 
 std::uint8_t paeth_predictor(std::uint8_t a, std::uint8_t b, std::uint8_t c)
@@ -109,6 +98,11 @@ std::uint16_t packed_sample(const std::vector<std::uint8_t>& row, std::size_t pi
     const std::size_t shift = 8 - static_cast<std::size_t>(bit_depth) - (bit_offset % 8);
     const std::uint8_t mask = static_cast<std::uint8_t>((1u << bit_depth) - 1u);
     return static_cast<std::uint16_t>((row[byte_index] >> shift) & mask);
+}
+
+std::uint16_t read_sample(const std::vector<std::uint8_t>& row, std::size_t offset, std::uint8_t bit_depth)
+{
+    return bit_depth == 16 ? read_be16(row, offset) : row[offset];
 }
 
 std::uint8_t sample_to_u8(std::uint16_t sample, std::uint8_t bit_depth)
@@ -308,21 +302,21 @@ bool Png_image::decode_png(const std::vector<std::uint8_t>& file_bytes)
             }
         };
 
+        // Stride between same-color samples within one pixel (in bytes).
+        // For sub-byte bit depths the per-pixel stride is meaningless: we
+        // always read those via packed_sample(), and color_type 3 is the
+        // only color_type that allows them.
+        const std::size_t step = bit_depth == 16 ? 2u : 1u;
+        const int channels = encoded_components(color_type);
+        const std::size_t pixel_stride = static_cast<std::size_t>(channels) * step;
+
         if (color_type == 0) {
             for (int x = 0; x < m_width_px; ++x) {
-                std::uint16_t sample = 0;
-                if (bit_depth < 8) {
-                    sample = packed_sample(cur, static_cast<std::size_t>(x), bit_depth);
-                }
-                else
-                if (bit_depth == 16) {
-                    sample = read_be16(cur, static_cast<std::size_t>(x) * 2u);
-                }
-                else {
-                    sample = cur[static_cast<std::size_t>(x)];
-                }
-                const std::uint8_t gray = sample_to_u8(sample, bit_depth);
-                m_pixels[pixel_row_offset + static_cast<std::size_t>(x)] = gray;
+                const std::size_t xz = static_cast<std::size_t>(x);
+                const std::uint16_t sample = bit_depth < 8
+                    ? packed_sample(cur, xz, bit_depth)
+                    : read_sample(cur, xz * step, bit_depth);
+                m_pixels[pixel_row_offset + xz] = sample_to_u8(sample, bit_depth);
                 if (has_gray_key) {
                     write_alpha(x, sample == transparency_gray ? 0 : 255);
                 }
@@ -331,10 +325,10 @@ bool Png_image::decode_png(const std::vector<std::uint8_t>& file_bytes)
         else
         if (color_type == 2) {
             for (int x = 0; x < m_width_px; ++x) {
-                const std::size_t src_offset = static_cast<std::size_t>(x) * (bit_depth == 16 ? 6u : 3u);
-                const std::uint16_t r = bit_depth == 16 ? read_be16(cur, src_offset) : cur[src_offset];
-                const std::uint16_t g = bit_depth == 16 ? read_be16(cur, src_offset + (bit_depth == 16 ? 2u : 1u)) : cur[src_offset + 1];
-                const std::uint16_t b = bit_depth == 16 ? read_be16(cur, src_offset + (bit_depth == 16 ? 4u : 2u)) : cur[src_offset + 2];
+                const std::size_t src_offset = static_cast<std::size_t>(x) * pixel_stride;
+                const std::uint16_t r = read_sample(cur, src_offset,            bit_depth);
+                const std::uint16_t g = read_sample(cur, src_offset + step,     bit_depth);
+                const std::uint16_t b = read_sample(cur, src_offset + 2 * step, bit_depth);
                 const std::size_t dst = output_row_offset + static_cast<std::size_t>(x) * 3u;
                 m_pixels[dst    ] = sample_to_u8(r, bit_depth);
                 m_pixels[dst + 1] = sample_to_u8(g, bit_depth);
@@ -347,15 +341,16 @@ bool Png_image::decode_png(const std::vector<std::uint8_t>& file_bytes)
         else
         if (color_type == 3) {
             for (int x = 0; x < m_width_px; ++x) {
+                const std::size_t xz = static_cast<std::size_t>(x);
                 const std::uint16_t index = bit_depth < 8
-                    ? packed_sample(cur, static_cast<std::size_t>(x), bit_depth)
-                    : cur[static_cast<std::size_t>(x)];
+                    ? packed_sample(cur, xz, bit_depth)
+                    : cur[xz];
                 const std::size_t palette_offset = static_cast<std::size_t>(index) * 3u;
                 if (palette_offset + 2 >= palette.size()) {
                     m_error = "Invalid PNG palette index";
                     return false;
                 }
-                const std::size_t dst = output_row_offset + static_cast<std::size_t>(x) * 3u;
+                const std::size_t dst = output_row_offset + xz * 3u;
                 m_pixels[dst    ] = palette[palette_offset    ];
                 m_pixels[dst + 1] = palette[palette_offset + 1];
                 m_pixels[dst + 2] = palette[palette_offset + 2];
@@ -368,9 +363,9 @@ bool Png_image::decode_png(const std::vector<std::uint8_t>& file_bytes)
         else
         if (color_type == 4) {
             for (int x = 0; x < m_width_px; ++x) {
-                const std::size_t src_offset = static_cast<std::size_t>(x) * (bit_depth == 16 ? 4u : 2u);
-                const std::uint16_t gray = bit_depth == 16 ? read_be16(cur, src_offset) : cur[src_offset];
-                const std::uint16_t alpha = bit_depth == 16 ? read_be16(cur, src_offset + (bit_depth == 16 ? 2u : 1u)) : cur[src_offset + 1];
+                const std::size_t src_offset = static_cast<std::size_t>(x) * pixel_stride;
+                const std::uint16_t gray  = read_sample(cur, src_offset,        bit_depth);
+                const std::uint16_t alpha = read_sample(cur, src_offset + step, bit_depth);
                 m_pixels[pixel_row_offset + static_cast<std::size_t>(x)] = sample_to_u8(gray, bit_depth);
                 write_alpha(x, sample_to_u8(alpha, bit_depth));
             }
@@ -378,13 +373,13 @@ bool Png_image::decode_png(const std::vector<std::uint8_t>& file_bytes)
         else
         if (color_type == 6) {
             for (int x = 0; x < m_width_px; ++x) {
-                const std::size_t src_offset = static_cast<std::size_t>(x) * (bit_depth == 16 ? 8u : 4u);
-                const std::uint16_t r = bit_depth == 16 ? read_be16(cur, src_offset) : cur[src_offset];
-                const std::uint16_t g = bit_depth == 16 ? read_be16(cur, src_offset + (bit_depth == 16 ? 2u : 1u)) : cur[src_offset + 1];
-                const std::uint16_t b = bit_depth == 16 ? read_be16(cur, src_offset + (bit_depth == 16 ? 4u : 2u)) : cur[src_offset + 2];
-                const std::uint16_t a = bit_depth == 16 ? read_be16(cur, src_offset + (bit_depth == 16 ? 6u : 3u)) : cur[src_offset + 3];
+                const std::size_t src_offset = static_cast<std::size_t>(x) * pixel_stride;
+                const std::uint16_t r = read_sample(cur, src_offset,            bit_depth);
+                const std::uint16_t g = read_sample(cur, src_offset + step,     bit_depth);
+                const std::uint16_t b = read_sample(cur, src_offset + 2 * step, bit_depth);
+                const std::uint16_t a = read_sample(cur, src_offset + 3 * step, bit_depth);
                 const std::size_t dst = output_row_offset + static_cast<std::size_t>(x) * 3u;
-                m_pixels[dst] = sample_to_u8(r, bit_depth);
+                m_pixels[dst    ] = sample_to_u8(r, bit_depth);
                 m_pixels[dst + 1] = sample_to_u8(g, bit_depth);
                 m_pixels[dst + 2] = sample_to_u8(b, bit_depth);
                 write_alpha(x, sample_to_u8(a, bit_depth));

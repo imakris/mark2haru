@@ -118,20 +118,6 @@ Pdf_writer::Pdf_writer(
     }
 }
 
-Pdf_writer::Pdf_writer(
-    double page_width_pt,
-    double page_height_pt,
-    const fs::path& font_root)
-:
-    Pdf_writer(
-        page_width_pt,
-        page_height_pt,
-        std::make_shared<Measurement_context>(
-            font_family_config_t::briefutil_default(),
-            font_root))
-{
-}
-
 bool Pdf_writer::fonts_loaded() const
 {
     return m_fonts_loaded;
@@ -183,14 +169,7 @@ void Pdf_writer::append_color(std::string& out, const color_t& color, bool strok
 
 std::string Pdf_writer::font_resource_name(Pdf_font font)
 {
-    switch (font) {
-        case Pdf_font::REGULAR:     return "/F1";
-        case Pdf_font::BOLD:        return "/F2";
-        case Pdf_font::ITALIC:      return "/F3";
-        case Pdf_font::BOLD_ITALIC: return "/F4";
-        case Pdf_font::MONO:        return "/F5";
-        default:                    return "/F1";
-    }
+    return std::string("/F") + static_cast<char>('1' + static_cast<int>(font));
 }
 
 std::vector<Pdf_font> Pdf_writer::used_fonts(const std::array<loaded_font_t, 5>& fonts)
@@ -228,25 +207,45 @@ std::string flate_encode_raw(const unsigned char* data, std::size_t size)
 
 } // namespace
 
-std::string Pdf_writer::encode_flate(const std::string& input)
-{
-    return flate_encode_raw(
-        reinterpret_cast<const unsigned char*>(input.data()),
-        input.size());
-}
+namespace {
 
-std::string Pdf_writer::encode_flate(const std::vector<std::uint8_t>& input)
+// Builds `<< /Length N [/Filter /FlateDecode] [extra] >>\nstream\n...payload...\nendstream`.
+// Compresses when the result is strictly smaller than the raw payload.
+std::string build_stream_object(
+    const unsigned char* data,
+    std::size_t          size,
+    const std::string&   extra_dict_entries = {})
 {
-    return flate_encode_raw(input.data(), input.size());
-}
+    const std::string raw(reinterpret_cast<const char*>(data), size);
+    const std::string compressed = flate_encode_raw(data, size);
+    const bool use_compressed = !compressed.empty() && compressed.size() < raw.size();
+    const std::string& payload = use_compressed ? compressed : raw;
 
-double Pdf_writer::measure_text_width(Pdf_font font, const std::string& text, double size_pt) const
-{
-    if (!m_metrics) {
-        return 0.0;
+    std::string out = "<< /Length " + std::to_string(payload.size());
+    if (use_compressed) {
+        out += " /Filter /FlateDecode";
     }
-    return m_metrics->measure_text_width(font, text, size_pt);
+    out += extra_dict_entries;
+    out += " >>\nstream\n";
+    out.append(payload);
+    out += "\nendstream";
+    return out;
 }
+
+std::string build_stream_object(const std::string& payload, const std::string& extra = {})
+{
+    return build_stream_object(
+        reinterpret_cast<const unsigned char*>(payload.data()),
+        payload.size(),
+        extra);
+}
+
+std::string build_stream_object(const std::vector<std::uint8_t>& payload, const std::string& extra = {})
+{
+    return build_stream_object(payload.data(), payload.size(), extra);
+}
+
+} // namespace
 
 std::string Pdf_writer::utf8_to_hex_cid_string(
     const True_type_font& font,
@@ -381,17 +380,6 @@ std::string Pdf_writer::make_to_unicode_cmap(const loaded_font_t& font)
     return cmap.str();
 }
 
-void Pdf_writer::stroke_line(double x1_pt, double y1_top_pt, double x2_pt, double y2_top_pt)
-{
-    auto& out = current_content();
-    out += "q\n";
-    append_color(out, m_stroke, true);
-    out += number_to_string(m_line_width_pt) + " w\n";
-    out += number_to_string(x1_pt) + " " + number_to_string(m_page_height_pt - y1_top_pt) + " m\n";
-    out += number_to_string(x2_pt) + " " + number_to_string(m_page_height_pt - y2_top_pt) + " l\nS\n";
-    out += "Q\n";
-}
-
 void Pdf_writer::stroke_rect(double x_pt, double y_top_pt, double w_pt, double h_pt)
 {
     auto& out = current_content();
@@ -470,21 +458,7 @@ bool Pdf_writer::save(const fs::path& path) const
         const int cid_obj = type0_obj + 3;
         const int unicode_obj = type0_obj + 4;
 
-        const auto& bytes = face.bytes();
-        const std::string font_compressed = encode_flate(bytes);
-        const bool font_is_compressed = !font_compressed.empty() && font_compressed.size() < bytes.size();
-        const std::string font_bytes = font_is_compressed
-            ? font_compressed
-            : std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size());
-        std::ostringstream font_stream;
-        font_stream << "<< /Length " << font_bytes.size();
-        if (font_is_compressed) {
-            font_stream << " /Filter /FlateDecode";
-        }
-        font_stream << " >>\nstream\n";
-        font_stream.write(font_bytes.data(), static_cast<std::streamsize>(font_bytes.size()));
-        font_stream << "\nendstream";
-        objects[file_obj] = font_stream.str();
+        objects[file_obj] = build_stream_object(face.bytes());
 
         const auto x_min = scale_1000(face.x_min(), face.units_per_em());
         const auto y_min = scale_1000(face.y_min(), face.units_per_em());
@@ -549,19 +523,7 @@ bool Pdf_writer::save(const fs::path& path) const
             << number_to_string(default_width_1000) << " /W " << widths.str() << " >>";
         objects[cid_obj] = cidfont.str();
 
-        const std::string cmap = make_to_unicode_cmap(slot);
-        const std::string cmap_compressed = encode_flate(cmap);
-        const bool cmap_is_compressed = !cmap_compressed.empty() && cmap_compressed.size() < cmap.size();
-        const std::string cmap_bytes = cmap_is_compressed ? cmap_compressed : cmap;
-        std::ostringstream cmap_stream;
-        cmap_stream << "<< /Length " << cmap_bytes.size();
-        if (cmap_is_compressed) {
-            cmap_stream << " /Filter /FlateDecode";
-        }
-        cmap_stream << " >>\nstream\n";
-        cmap_stream.write(cmap_bytes.data(), static_cast<std::streamsize>(cmap_bytes.size()));
-        cmap_stream << "\nendstream";
-        objects[unicode_obj] = cmap_stream.str();
+        objects[unicode_obj] = build_stream_object(make_to_unicode_cmap(slot));
 
         std::ostringstream type0_font;
         type0_font << "<< /Type /Font /Subtype /Type0 /BaseFont /" << m_metrics->font_tag_name(font_id)
@@ -573,50 +535,25 @@ bool Pdf_writer::save(const fs::path& path) const
     for (std::size_t i = 0; i < m_images.size(); ++i) {
         const auto& image = m_images[i].image;
         const auto& numbers = image_objects[i];
-        const std::vector<std::uint8_t>& data = image.pixels();
-        const std::string compressed = encode_flate(data);
-        const bool use_compressed = !compressed.empty() && compressed.size() < data.size();
-        const std::string payload = use_compressed
-            ? compressed
-            : std::string(reinterpret_cast<const char*>(data.data()), data.size());
 
-        std::ostringstream image_stream;
-        image_stream
-            << "<< /Type /XObject /Subtype /Image /Width " << image.width_px()
+        std::ostringstream image_dict;
+        image_dict
+            << " /Type /XObject /Subtype /Image /Width " << image.width_px()
             << " /Height " << image.height_px() << " /ColorSpace "
             << (image.color_components() == 1 ? "/DeviceGray" : "/DeviceRGB")
             << " /BitsPerComponent 8";
         if (image.has_alpha()) {
-            image_stream << " /SMask " << numbers.mask_obj << " 0 R";
+            image_dict << " /SMask " << numbers.mask_obj << " 0 R";
         }
-        image_stream << " /Length " << payload.size();
-        if (use_compressed) {
-            image_stream << " /Filter /FlateDecode";
-        }
-        image_stream << " >>\nstream\n";
-        image_stream.write(payload.data(), static_cast<std::streamsize>(payload.size()));
-        image_stream << "\nendstream";
-        objects[numbers.image_obj] = image_stream.str();
+        objects[numbers.image_obj] = build_stream_object(image.pixels(), image_dict.str());
 
         if (image.has_alpha()) {
-            const std::vector<std::uint8_t>& alpha = image.alpha();
-            const std::string alpha_compressed = encode_flate(alpha);
-            const bool alpha_use_compressed = !alpha_compressed.empty() && alpha_compressed.size() < alpha.size();
-            const std::string alpha_payload = alpha_use_compressed
-                ? alpha_compressed
-                : std::string(reinterpret_cast<const char*>(alpha.data()), alpha.size());
-            std::ostringstream alpha_stream;
-            alpha_stream
-                << "<< /Type /XObject /Subtype /Image /Width " << image.width_px()
+            std::ostringstream alpha_dict;
+            alpha_dict
+                << " /Type /XObject /Subtype /Image /Width " << image.width_px()
                 << " /Height " << image.height_px()
-                << " /ColorSpace /DeviceGray /BitsPerComponent 8 /Length " << alpha_payload.size();
-            if (alpha_use_compressed) {
-                alpha_stream << " /Filter /FlateDecode";
-            }
-            alpha_stream << " >>\nstream\n";
-            alpha_stream.write(alpha_payload.data(), static_cast<std::streamsize>(alpha_payload.size()));
-            alpha_stream << "\nendstream";
-            objects[numbers.mask_obj] = alpha_stream.str();
+                << " /ColorSpace /DeviceGray /BitsPerComponent 8";
+            objects[numbers.mask_obj] = build_stream_object(image.alpha(), alpha_dict.str());
         }
     }
 
@@ -625,18 +562,7 @@ bool Pdf_writer::save(const fs::path& path) const
         const int page_obj = page_base_obj + i;
         const page_t& page = m_pages[static_cast<std::size_t>(i)];
 
-        const std::string content_compressed = encode_flate(page.content);
-        const bool content_is_compressed = !content_compressed.empty() && content_compressed.size() < page.content.size();
-        const std::string content_bytes = content_is_compressed ? content_compressed : page.content;
-        std::ostringstream content;
-        content << "<< /Length " << content_bytes.size();
-        if (content_is_compressed) {
-            content << " /Filter /FlateDecode";
-        }
-        content << " >>\nstream\n";
-        content.write(content_bytes.data(), static_cast<std::streamsize>(content_bytes.size()));
-        content << "\nendstream";
-        objects[content_obj] = content.str();
+        objects[content_obj] = build_stream_object(page.content);
 
         std::ostringstream resources;
         resources << "<< /Font << ";

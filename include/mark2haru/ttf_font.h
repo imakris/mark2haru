@@ -34,7 +34,6 @@ public:
 
     std::uint16_t glyph_for_codepoint(std::uint32_t codepoint) const;
     std::uint16_t advance_width_for_gid(std::uint16_t gid) const;
-    double advance_width_pt(std::uint32_t codepoint, double size_pt) const;
 
     static std::uint16_t read_u16(const std::vector<std::uint8_t>& data, std::uint32_t offset);
     static std::int16_t  read_i16(const std::vector<std::uint8_t>& data, std::uint32_t offset);

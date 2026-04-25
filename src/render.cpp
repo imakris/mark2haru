@@ -18,14 +18,14 @@ namespace fs = std::filesystem;
 
 Pdf_font font_for(Inline_style style)
 {
-    switch (style) {
-        case Inline_style::BOLD:        return Pdf_font::BOLD;
-        case Inline_style::ITALIC:      return Pdf_font::ITALIC;
-        case Inline_style::BOLD_ITALIC: return Pdf_font::BOLD_ITALIC;
-        case Inline_style::CODE:        return Pdf_font::MONO;
-        case Inline_style::NORMAL:
-        default:                        return Pdf_font::REGULAR;
-    }
+    constexpr Pdf_font table[] = {
+        Pdf_font::REGULAR,     // NORMAL
+        Pdf_font::BOLD,        // BOLD
+        Pdf_font::ITALIC,      // ITALIC
+        Pdf_font::BOLD_ITALIC, // BOLD_ITALIC
+        Pdf_font::MONO,        // CODE
+    };
+    return table[static_cast<std::size_t>(style)];
 }
 
 struct token_t {
@@ -179,39 +179,28 @@ double total_height(const std::vector<line_t>& lines)
     return h;
 }
 
-double heading_size(int level, double body_size)
-{
-    switch (level) {
-        case 1:  return body_size * 1.65;
-        case 2:  return body_size * 1.35;
-        case 3:  return body_size * 1.18;
-        case 4:  return body_size * 1.08;
-        case 5:  return body_size * 1.00;
-        case 6:  return body_size * 0.92;
-        default: return body_size;
-    }
-}
+struct heading_metrics_t {
+    double size_factor;
+    double space_before_factor;
+    double space_after_factor;
+};
 
-double heading_spacing_before(int level, double body_size)
-{
-    switch (level) {
-        case 1:  return body_size * 0.95;
-        case 2:  return body_size * 0.75;
-        case 3:  return body_size * 0.60;
-        case 4:  return body_size * 0.50;
-        default: return body_size * 0.45;
-    }
-}
+constexpr heading_metrics_t heading_metrics_table[] = {
+    { 1.00, 0.45, 0.35 }, // index 0 unused: level 0 / level >=7 fallback
+    { 1.65, 0.95, 0.65 }, // h1
+    { 1.35, 0.75, 0.55 }, // h2
+    { 1.18, 0.60, 0.45 }, // h3
+    { 1.08, 0.50, 0.40 }, // h4
+    { 1.00, 0.45, 0.35 }, // h5
+    { 0.92, 0.45, 0.35 }, // h6
+};
 
-double heading_spacing_after(int level, double body_size)
+const heading_metrics_t& heading_metrics(int level)
 {
-    switch (level) {
-        case 1:  return body_size * 0.65;
-        case 2:  return body_size * 0.55;
-        case 3:  return body_size * 0.45;
-        case 4:  return body_size * 0.40;
-        default: return body_size * 0.35;
+    if (level < 1 || level > 6) {
+        return heading_metrics_table[0];
     }
+    return heading_metrics_table[level];
 }
 
 std::string list_marker(const list_block_t& lb, size_t index)
@@ -223,30 +212,6 @@ std::string list_marker(const list_block_t& lb, size_t index)
     return std::to_string(lb.start_number + static_cast<int>(index)) + ".";
 }
 
-std::vector<std::string> code_split_lines(const std::string& text)
-{
-    std::vector<std::string> lines;
-    size_t pos = 0;
-    while (pos < text.size()) {
-        const size_t nl = text.find('\n', pos);
-        if (nl == std::string::npos) {
-            std::string line = text.substr(pos);
-            if (!line.empty() && line.back() == '\r') {
-                line.pop_back();
-            }
-            lines.push_back(std::move(line));
-            break;
-        }
-        std::string line = text.substr(pos, nl - pos);
-        if (!line.empty() && line.back() == '\r') {
-            line.pop_back();
-        }
-        lines.push_back(std::move(line));
-        pos = nl + 1;
-    }
-    return lines;
-}
-
 template <class MeasureFn>
 std::vector<line_t> code_lines(
     const std::string& text,
@@ -256,7 +221,7 @@ std::vector<line_t> code_lines(
     MeasureFn&& measure)
 {
     std::vector<line_t> lines;
-    for (const auto& raw : code_split_lines(text)) {
+    for (const auto& raw : split_lines(text)) {
         std::vector<token_t> tokens;
         tokens.push_back({ raw, Inline_style::CODE, false });
         auto wrapped = wrap_tokens(tokens, max_width_pt, size_pt, leading, measure);
@@ -341,16 +306,19 @@ bool render_markdown_to_pdf(
 
         if (std::holds_alternative<heading_block_t>(block)) {
             const auto& hb = std::get<heading_block_t>(block);
-            const double size = heading_size(hb.level, options.body_size_pt);
+            const auto& metrics = heading_metrics(hb.level);
+            const double size = options.body_size_pt * metrics.size_factor;
+            const double space_before = size * metrics.space_before_factor;
+            const double space_after = size * metrics.space_after_factor;
             const auto lines = wrap_runs(hb.runs, content_width, size, 1.15, measure);
             const double height = total_height(lines);
-            ensure_space(heading_spacing_before(hb.level, size) + height + heading_spacing_after(hb.level, size));
-            cursor_y += heading_spacing_before(hb.level, size);
+            ensure_space(space_before + height + space_after);
+            cursor_y += space_before;
             for (const auto& line : lines) {
                 draw_line(line, size, options.margin_left_pt);
                 cursor_y += line.height_pt;
             }
-            cursor_y += heading_spacing_after(hb.level, size);
+            cursor_y += space_after;
             continue;
         }
 

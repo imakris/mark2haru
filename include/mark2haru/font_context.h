@@ -67,14 +67,12 @@ public:
 
     double measure_text_width(Pdf_font font, const std::string& text, double size_pt) const;
     const True_type_font& font_face(Pdf_font font) const;
-    const std::filesystem::path& font_path(Pdf_font font) const;
     const std::string& font_tag_name(Pdf_font font) const;
 
 private:
     struct slot_t
     {
         True_type_font face;
-        std::filesystem::path source_path;
         std::string tag_name;
     };
 
