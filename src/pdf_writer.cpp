@@ -162,22 +162,7 @@ void Pdf_writer::begin_page()
     m_pages.push_back(page_t{});
 }
 
-void Pdf_writer::set_stroke_color(const color_t& color)
-{
-    m_stroke = color;
-}
-
-void Pdf_writer::set_fill_color(const color_t& color)
-{
-    m_fill = color;
-}
-
-void Pdf_writer::set_line_width(double width_pt)
-{
-    m_line_width_pt = width_pt;
-}
-
-void Pdf_writer::append_color(std::string& out, const color_t& color, bool stroke) const
+void Pdf_writer::append_color(std::string& out, const color_t& color, bool stroke)
 {
     out += number_to_string(clamp_unit(color.r));
     out.push_back(' ');
@@ -470,22 +455,26 @@ std::string Pdf_writer::make_to_unicode_cmap(const loaded_font_t& font)
     return cmap.str();
 }
 
-void Pdf_writer::stroke_rect(double x_pt, double y_top_pt, double w_pt, double h_pt)
+void Pdf_writer::stroke_rect(
+    double x_pt, double y_top_pt, double w_pt, double h_pt,
+    const color_t& color, double line_width_pt)
 {
     auto& out = current_content();
     out += "q\n";
-    append_color(out, m_stroke, true);
-    out += number_to_string(m_line_width_pt) + " w\n";
+    append_color(out, color, true);
+    out += number_to_string(line_width_pt) + " w\n";
     out += number_to_string(x_pt) + " " + number_to_string(m_page_height_pt - y_top_pt - h_pt)
         + " " + number_to_string(w_pt) + " " + number_to_string(h_pt) + " re\nS\n";
     out += "Q\n";
 }
 
-void Pdf_writer::fill_rect(double x_pt, double y_top_pt, double w_pt, double h_pt)
+void Pdf_writer::fill_rect(
+    double x_pt, double y_top_pt, double w_pt, double h_pt,
+    const color_t& color)
 {
     auto& out = current_content();
     out += "q\n";
-    append_color(out, m_fill, false);
+    append_color(out, color, false);
     out += number_to_string(x_pt) + " " + number_to_string(m_page_height_pt - y_top_pt - h_pt)
         + " " + number_to_string(w_pt) + " " + number_to_string(h_pt) + " re\nf\n";
     out += "Q\n";

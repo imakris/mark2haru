@@ -33,11 +33,12 @@ public:
     const std::string& font_error() const { return m_font_error; }
 
     void begin_page();
-    void set_stroke_color(const color_t& color);
-    void set_fill_color(const color_t& color);
-    void set_line_width(double width_pt);
-    void stroke_rect(double x_pt, double y_top_pt, double w_pt, double h_pt);
-    void fill_rect(double x_pt, double y_top_pt, double w_pt, double h_pt);
+    void stroke_rect(
+        double x_pt, double y_top_pt, double w_pt, double h_pt,
+        const color_t& color, double line_width_pt);
+    void fill_rect(
+        double x_pt, double y_top_pt, double w_pt, double h_pt,
+        const color_t& color);
     void draw_text(
         double x_pt,
         double y_top_pt,
@@ -75,9 +76,6 @@ private:
 
     double m_page_width_pt  = 0.0;
     double m_page_height_pt = 0.0;
-    color_t m_stroke{};
-    color_t m_fill{};
-    double m_line_width_pt = 0.5;
     std::vector<page_t> m_pages;
     std::shared_ptr<const Measurement_context> m_metrics;
     std::array<loaded_font_t, 5> m_fonts{};
@@ -87,7 +85,7 @@ private:
 
     std::string& current_content();
     page_t& current_page();
-    void append_color(std::string& out, const color_t& color, bool stroke) const;
+    static void append_color(std::string& out, const color_t& color, bool stroke);
     static std::string font_resource_name(Pdf_font font);
     static std::string utf8_to_hex_cid_string(
         const True_type_font& font,

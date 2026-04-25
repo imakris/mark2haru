@@ -258,9 +258,10 @@ bool render_markdown_to_pdf(
         return false;
     }
 
-    writer.set_stroke_color({ 0.2, 0.2, 0.2 });
-    writer.set_fill_color({ 0.96, 0.96, 0.96 });
-    writer.set_line_width(0.75);
+    constexpr color_t default_stroke = { 0.2, 0.2, 0.2 };
+    constexpr color_t code_block_fill = { 0.96, 0.96, 0.96 };
+    constexpr color_t table_header_fill = { 0.92, 0.92, 0.92 };
+    constexpr double border_line_width = 0.75;
 
     const double content_width = options.page_width_pt - options.margin_left_pt - options.margin_right_pt;
     double cursor_y = options.margin_top_pt;
@@ -358,7 +359,8 @@ bool render_markdown_to_pdf(
             const auto lines = code_lines(cb.text, available_width, size, 1.25, measure);
             const double height = total_height(lines) + pad * 2.0;
             ensure_space(height + options.body_size_pt * 0.2);
-            writer.fill_rect(options.margin_left_pt, cursor_y, content_width, height);
+            writer.fill_rect(options.margin_left_pt, cursor_y, content_width, height,
+                             code_block_fill);
             double y = cursor_y + pad;
             for (const auto& line : lines) {
                 double x = options.margin_left_pt + pad;
@@ -368,7 +370,8 @@ bool render_markdown_to_pdf(
                 }
                 y += line.height_pt;
             }
-            writer.stroke_rect(options.margin_left_pt, cursor_y, content_width, height);
+            writer.stroke_rect(options.margin_left_pt, cursor_y, content_width, height,
+                               default_stroke, border_line_width);
             cursor_y += height + options.body_size_pt * 0.25;
             continue;
         }
@@ -411,14 +414,14 @@ bool render_markdown_to_pdf(
                 const double row_height = row_heights[row_idx];
                 const bool header = tb.has_header && row_idx == 0;
                 if (header) {
-                    writer.set_fill_color({ 0.92, 0.92, 0.92 });
-                    writer.fill_rect(options.margin_left_pt, cursor_y, content_width, row_height);
-                    writer.set_fill_color({ 0.96, 0.96, 0.96 });
+                    writer.fill_rect(options.margin_left_pt, cursor_y, content_width, row_height,
+                                     table_header_fill);
                 }
 
                 double x = options.margin_left_pt;
                 for (size_t col = 0; col < column_count; ++col) {
-                    writer.stroke_rect(x, cursor_y, col_width, row_height);
+                    writer.stroke_rect(x, cursor_y, col_width, row_height,
+                                       default_stroke, border_line_width);
                     const auto& lines = cell_lines[row_idx][col];
                     double cell_y = cursor_y + cell_pad;
                     for (const auto& line : lines) {
