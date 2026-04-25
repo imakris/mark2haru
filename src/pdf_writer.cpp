@@ -4,9 +4,11 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdlib>
 #include <fstream>
 #include <iomanip>
+#include <ostream>
 #include <sstream>
 #include <string_view>
 #include <utility>
@@ -21,6 +23,11 @@ namespace fs = std::filesystem;
 template <class T>
 std::string number_to_string(T value)
 {
+    // PDF parsers reject NaN/Inf; emit a syntactically valid "0" instead so
+    // a numerical bug in callers never produces an unparseable file.
+    if (!std::isfinite(static_cast<double>(value))) {
+        return "0";
+    }
     std::ostringstream ss;
     ss.setf(std::ios::fixed);
     ss << std::setprecision(3) << value;
@@ -41,6 +48,20 @@ std::string number_to_string(T value)
         out = "0";
     }
     return out;
+}
+
+double clamp_unit(double v)
+{
+    if (!std::isfinite(v)) {
+        return 0.0;
+    }
+    if (v < 0.0) {
+        return 0.0;
+    }
+    if (v > 1.0) {
+        return 1.0;
+    }
+    return v;
 }
 
 std::string hex_byte(std::uint8_t byte)
@@ -158,11 +179,11 @@ void Pdf_writer::set_line_width(double width_pt)
 
 void Pdf_writer::append_color(std::string& out, const color_t& color, bool stroke) const
 {
-    out += number_to_string(color.r);
+    out += number_to_string(clamp_unit(color.r));
     out.push_back(' ');
-    out += number_to_string(color.g);
+    out += number_to_string(clamp_unit(color.g));
     out.push_back(' ');
-    out += number_to_string(color.b);
+    out += number_to_string(clamp_unit(color.b));
     out.push_back(' ');
     out += stroke ? "RG\n" : "rg\n";
 }
@@ -244,6 +265,75 @@ std::string build_stream_object(const std::vector<std::uint8_t>& payload, const 
 {
     return build_stream_object(payload.data(), payload.size(), extra);
 }
+
+// Allocates 1-based PDF object IDs on demand and lets callers fill in the
+// body any time before write(). Eliminates the manual "next_obj++" arithmetic
+// and the implicit invariant that body order matches reservation order.
+class Pdf_object_table
+{
+public:
+    int reserve()
+    {
+        ++m_count;
+        return m_count;
+    }
+
+    void emit(int id, std::string body)
+    {
+        const auto idx = static_cast<std::size_t>(id);
+        if (idx >= m_bodies.size()) {
+            m_bodies.resize(idx + 1);
+        }
+        m_bodies[idx] = std::move(body);
+    }
+
+    int count() const { return m_count; }
+
+    bool write(std::ostream& out, int catalog_id) const
+    {
+        const std::string header = "%PDF-1.4\n%\xE2\xE3\xCF\xD3\n";
+        out.write(header.data(), static_cast<std::streamsize>(header.size()));
+        if (!out) {
+            return false;
+        }
+
+        std::vector<std::streamoff> offsets(static_cast<std::size_t>(m_count + 1), 0);
+        for (int i = 1; i <= m_count; ++i) {
+            const std::streamoff pos = out.tellp();
+            if (pos < 0) {
+                return false;
+            }
+            offsets[static_cast<std::size_t>(i)] = pos;
+
+            const std::string& body = m_bodies[static_cast<std::size_t>(i)];
+            out << i << " 0 obj\n";
+            out.write(body.data(), static_cast<std::streamsize>(body.size()));
+            out << "\nendobj\n";
+            if (!out) {
+                return false;
+            }
+        }
+
+        const std::streamoff xref_pos = out.tellp();
+        if (xref_pos < 0) {
+            return false;
+        }
+        out << "xref\n0 " << (m_count + 1) << "\n";
+        out << "0000000000 65535 f \n";
+        for (int i = 1; i <= m_count; ++i) {
+            out << std::setw(10) << std::setfill('0')
+                << offsets[static_cast<std::size_t>(i)] << " 00000 n \n";
+        }
+        out << "trailer\n<< /Size " << (m_count + 1)
+            << " /Root " << catalog_id << " 0 R >>\nstartxref\n"
+            << xref_pos << "\n%%EOF\n";
+        return static_cast<bool>(out);
+    }
+
+private:
+    int m_count = 0;
+    std::vector<std::string> m_bodies = std::vector<std::string>(1); // index 0 unused (free entry)
+};
 
 } // namespace
 
@@ -407,58 +497,72 @@ bool Pdf_writer::save(const fs::path& path) const
         return false;
     }
 
-    std::ofstream out(path, std::ios::binary);
-    if (!out) {
-        return false;
-    }
+    Pdf_object_table table;
+
+    const int catalog_id = table.reserve();
+    const int pages_id = table.reserve();
 
     const auto used_font_ids = used_fonts(m_fonts);
-    const int font_count = static_cast<int>(used_font_ids.size());
-    const int page_count = static_cast<int>(m_pages.size());
-    const int catalog_obj = 1;
-    const int pages_obj = 2;
-    const int font_base_obj = 3;
-    const int font_objects_per_face = 5;
 
-    struct image_object_numbers_t {
-        int image_obj = 0;
-        int mask_obj = 0;
+    struct font_object_ids_t {
+        int type0 = 0;
+        int file = 0;
+        int descriptor = 0;
+        int cid = 0;
+        int to_unicode = 0;
     };
-    std::vector<image_object_numbers_t> image_objects(m_images.size());
-    int next_obj = font_base_obj + font_count * font_objects_per_face;
+    std::vector<font_object_ids_t> font_objects(used_font_ids.size());
+    for (auto& f : font_objects) {
+        f.type0      = table.reserve();
+        f.file       = table.reserve();
+        f.descriptor = table.reserve();
+        f.cid        = table.reserve();
+        f.to_unicode = table.reserve();
+    }
+
+    struct image_object_ids_t {
+        int image = 0;
+        int mask = 0;
+    };
+    std::vector<image_object_ids_t> image_objects(m_images.size());
     for (std::size_t i = 0; i < m_images.size(); ++i) {
-        image_objects[i].image_obj = next_obj++;
+        image_objects[i].image = table.reserve();
         if (m_images[i].image.has_alpha()) {
-            image_objects[i].mask_obj = next_obj++;
+            image_objects[i].mask = table.reserve();
         }
     }
-    const int content_base_obj = next_obj;
-    const int page_base_obj = content_base_obj + page_count;
-    const int total_objects = page_base_obj + page_count - 1;
 
-    std::vector<std::string> objects(static_cast<std::size_t>(total_objects + 1));
-    objects[catalog_obj] = "<< /Type /Catalog /Pages 2 0 R >>";
-
-    std::ostringstream kids;
-    kids << "[ ";
-    for (int i = 0; i < page_count; ++i) {
-        kids << (page_base_obj + i) << " 0 R ";
+    struct page_object_ids_t {
+        int content = 0;
+        int page = 0;
+    };
+    std::vector<page_object_ids_t> page_objects(m_pages.size());
+    for (auto& p : page_objects) {
+        p.content = table.reserve();
+        p.page    = table.reserve();
     }
-    kids << "]";
-    objects[pages_obj] = "<< /Type /Pages /Kids " + kids.str() + " /Count "
-        + std::to_string(page_count) + " >>";
 
-    for (int used_index = 0; used_index < font_count; ++used_index) {
-        const Pdf_font font_id = used_font_ids[static_cast<std::size_t>(used_index)];
+    table.emit(
+        catalog_id,
+        "<< /Type /Catalog /Pages " + std::to_string(pages_id) + " 0 R >>");
+
+    {
+        std::ostringstream pages_body;
+        pages_body << "<< /Type /Pages /Kids [ ";
+        for (const auto& p : page_objects) {
+            pages_body << p.page << " 0 R ";
+        }
+        pages_body << "] /Count " << page_objects.size() << " >>";
+        table.emit(pages_id, pages_body.str());
+    }
+
+    for (std::size_t font_index = 0; font_index < used_font_ids.size(); ++font_index) {
+        const Pdf_font font_id = used_font_ids[font_index];
         const auto& slot = m_fonts[static_cast<std::size_t>(font_id)];
         const auto& face = m_metrics->font_face(font_id);
-        const int type0_obj = font_base_obj + used_index * font_objects_per_face;
-        const int file_obj = type0_obj + 1;
-        const int desc_obj = type0_obj + 2;
-        const int cid_obj = type0_obj + 3;
-        const int unicode_obj = type0_obj + 4;
+        const auto& ids = font_objects[font_index];
 
-        objects[file_obj] = build_stream_object(face.bytes());
+        table.emit(ids.file, build_stream_object(face.bytes()));
 
         const auto x_min = scale_1000(face.x_min(), face.units_per_em());
         const auto y_min = scale_1000(face.y_min(), face.units_per_em());
@@ -487,8 +591,8 @@ bool Pdf_writer::save(const fs::path& path) const
             flags |= 0x40;
         }
 
-        std::ostringstream desc;
-        desc << "<< /Type /FontDescriptor /FontName /" << m_metrics->font_tag_name(font_id)
+        std::ostringstream descriptor;
+        descriptor << "<< /Type /FontDescriptor /FontName /" << m_metrics->font_tag_name(font_id)
             << " /Flags " << flags
             << " /Ascent " << number_to_string(ascent)
             << " /Descent " << number_to_string(descent)
@@ -497,8 +601,8 @@ bool Pdf_writer::save(const fs::path& path) const
             << " /StemV 80 /FontBBox ["
             << number_to_string(x_min) << ' ' << number_to_string(y_min) << ' '
             << number_to_string(x_max) << ' ' << number_to_string(y_max)
-            << "] /FontFile2 " << file_obj << " 0 R >>";
-        objects[desc_obj] = desc.str();
+            << "] /FontFile2 " << ids.file << " 0 R >>";
+        table.emit(ids.descriptor, descriptor.str());
 
         std::ostringstream widths;
         widths << "[ ";
@@ -518,23 +622,23 @@ bool Pdf_writer::save(const fs::path& path) const
 
         std::ostringstream cidfont;
         cidfont << "<< /Type /Font /Subtype /CIDFontType2 /BaseFont /" << m_metrics->font_tag_name(font_id)
-            << " /FontDescriptor " << desc_obj << " 0 R /CIDSystemInfo << /Registry (Adobe)"
+            << " /FontDescriptor " << ids.descriptor << " 0 R /CIDSystemInfo << /Registry (Adobe)"
             << " /Ordering (Identity) /Supplement 0 >> /CIDToGIDMap /Identity /DW "
             << number_to_string(default_width_1000) << " /W " << widths.str() << " >>";
-        objects[cid_obj] = cidfont.str();
+        table.emit(ids.cid, cidfont.str());
 
-        objects[unicode_obj] = build_stream_object(make_to_unicode_cmap(slot));
+        table.emit(ids.to_unicode, build_stream_object(make_to_unicode_cmap(slot)));
 
-        std::ostringstream type0_font;
-        type0_font << "<< /Type /Font /Subtype /Type0 /BaseFont /" << m_metrics->font_tag_name(font_id)
-            << " /Encoding /Identity-H /DescendantFonts [ " << cid_obj
-            << " 0 R ] /ToUnicode " << unicode_obj << " 0 R >>";
-        objects[type0_obj] = type0_font.str();
+        std::ostringstream type0;
+        type0 << "<< /Type /Font /Subtype /Type0 /BaseFont /" << m_metrics->font_tag_name(font_id)
+            << " /Encoding /Identity-H /DescendantFonts [ " << ids.cid
+            << " 0 R ] /ToUnicode " << ids.to_unicode << " 0 R >>";
+        table.emit(ids.type0, type0.str());
     }
 
     for (std::size_t i = 0; i < m_images.size(); ++i) {
         const auto& image = m_images[i].image;
-        const auto& numbers = image_objects[i];
+        const auto& ids = image_objects[i];
 
         std::ostringstream image_dict;
         image_dict
@@ -543,9 +647,9 @@ bool Pdf_writer::save(const fs::path& path) const
             << (image.color_components() == 1 ? "/DeviceGray" : "/DeviceRGB")
             << " /BitsPerComponent 8";
         if (image.has_alpha()) {
-            image_dict << " /SMask " << numbers.mask_obj << " 0 R";
+            image_dict << " /SMask " << ids.mask << " 0 R";
         }
-        objects[numbers.image_obj] = build_stream_object(image.pixels(), image_dict.str());
+        table.emit(ids.image, build_stream_object(image.pixels(), image_dict.str()));
 
         if (image.has_alpha()) {
             std::ostringstream alpha_dict;
@@ -553,23 +657,21 @@ bool Pdf_writer::save(const fs::path& path) const
                 << " /Type /XObject /Subtype /Image /Width " << image.width_px()
                 << " /Height " << image.height_px()
                 << " /ColorSpace /DeviceGray /BitsPerComponent 8";
-            objects[numbers.mask_obj] = build_stream_object(image.alpha(), alpha_dict.str());
+            table.emit(ids.mask, build_stream_object(image.alpha(), alpha_dict.str()));
         }
     }
 
-    for (int i = 0; i < page_count; ++i) {
-        const int content_obj = content_base_obj + i;
-        const int page_obj = page_base_obj + i;
-        const page_t& page = m_pages[static_cast<std::size_t>(i)];
+    for (std::size_t i = 0; i < m_pages.size(); ++i) {
+        const page_t& page = m_pages[i];
+        const auto& ids = page_objects[i];
 
-        objects[content_obj] = build_stream_object(page.content);
+        table.emit(ids.content, build_stream_object(page.content));
 
         std::ostringstream resources;
         resources << "<< /Font << ";
-        for (int used_index = 0; used_index < font_count; ++used_index) {
-            const Pdf_font font_id = used_font_ids[static_cast<std::size_t>(used_index)];
-            resources << font_resource_name(font_id) << ' '
-                << (font_base_obj + used_index * font_objects_per_face) << " 0 R ";
+        for (std::size_t font_index = 0; font_index < used_font_ids.size(); ++font_index) {
+            resources << font_resource_name(used_font_ids[font_index]) << ' '
+                << font_objects[font_index].type0 << " 0 R ";
         }
         resources << ">>";
 
@@ -577,39 +679,26 @@ bool Pdf_writer::save(const fs::path& path) const
             resources << " /XObject << ";
             for (std::size_t image_index : page.image_indices) {
                 resources << m_images[image_index].resource_name << ' '
-                    << image_objects[image_index].image_obj << " 0 R ";
+                    << image_objects[image_index].image << " 0 R ";
             }
             resources << ">>";
         }
         resources << " >>";
 
-        std::ostringstream page_obj_body;
-        page_obj_body << "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 "
+        std::ostringstream page_body;
+        page_body << "<< /Type /Page /Parent " << pages_id << " 0 R /MediaBox [0 0 "
             << number_to_string(m_page_width_pt) << ' '
             << number_to_string(m_page_height_pt) << "] /Resources "
             << resources.str()
-            << " /Contents " << content_obj << " 0 R >>";
-        objects[page_obj] = page_obj_body.str();
+            << " /Contents " << ids.content << " 0 R >>";
+        table.emit(ids.page, page_body.str());
     }
 
-    const std::string header = "%PDF-1.4\n%\xE2\xE3\xCF\xD3\n";
-    out.write(header.data(), static_cast<std::streamsize>(header.size()));
-    std::vector<std::streamoff> offsets(static_cast<std::size_t>(total_objects + 1));
-    for (int i = 1; i <= total_objects; ++i) {
-        offsets[i] = out.tellp();
-        out << i << " 0 obj\n" << objects[i] << "\nendobj\n";
+    std::ofstream out(path, std::ios::binary);
+    if (!out) {
+        return false;
     }
-
-    const std::streamoff xref_pos = out.tellp();
-    out << "xref\n0 " << (total_objects + 1) << "\n";
-    out << "0000000000 65535 f \n";
-    for (int i = 1; i <= total_objects; ++i) {
-        out << std::setw(10) << std::setfill('0') << offsets[i]
-            << " 00000 n \n";
-    }
-    out << "trailer\n<< /Size " << (total_objects + 1)
-        << " /Root 1 0 R >>\nstartxref\n" << xref_pos << "\n%%EOF\n";
-    return static_cast<bool>(out);
+    return table.write(out, catalog_id);
 }
 
 } // namespace mark2haru
