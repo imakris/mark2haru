@@ -117,6 +117,72 @@ bool starts_with_pdf_header(const fs::path& path)
     return in.gcount() == 4 && header[0] == '%' && header[1] == 'P' && header[2] == 'D' && header[3] == 'F';
 }
 
+// Writes a deliberately-corrupt PNG by emitting the signature plus a list of
+// raw chunk bodies, with no validation of chunk types or order. Used to feed
+// the decoder cases it's expected to reject.
+bool write_raw_png(
+    const fs::path& path,
+    const std::vector<std::pair<std::array<char, 4>, std::vector<std::uint8_t>>>& chunks)
+{
+    std::ofstream out(path, std::ios::binary);
+    if (!out) {
+        return false;
+    }
+    static constexpr std::array<std::uint8_t, 8> signature = { 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A };
+    out.write(reinterpret_cast<const char*>(signature.data()), static_cast<std::streamsize>(signature.size()));
+    for (const auto& [type, body] : chunks) {
+        write_u32_be(out, static_cast<std::uint32_t>(body.size()));
+        out.write(type.data(), 4);
+        if (!body.empty()) {
+            out.write(reinterpret_cast<const char*>(body.data()), static_cast<std::streamsize>(body.size()));
+        }
+        write_u32_be(out, 0); // bogus CRC; decoder does not verify CRCs
+    }
+    return static_cast<bool>(out);
+}
+
+std::vector<std::uint8_t> ihdr_body(
+    std::uint32_t width,
+    std::uint32_t height,
+    std::uint8_t  bit_depth,
+    std::uint8_t  color_type)
+{
+    std::vector<std::uint8_t> body;
+    body.reserve(13);
+    body.push_back(static_cast<std::uint8_t>((width  >> 24) & 0xFF));
+    body.push_back(static_cast<std::uint8_t>((width  >> 16) & 0xFF));
+    body.push_back(static_cast<std::uint8_t>((width  >>  8) & 0xFF));
+    body.push_back(static_cast<std::uint8_t>( width         & 0xFF));
+    body.push_back(static_cast<std::uint8_t>((height >> 24) & 0xFF));
+    body.push_back(static_cast<std::uint8_t>((height >> 16) & 0xFF));
+    body.push_back(static_cast<std::uint8_t>((height >>  8) & 0xFF));
+    body.push_back(static_cast<std::uint8_t>( height        & 0xFF));
+    body.push_back(bit_depth);
+    body.push_back(color_type);
+    body.push_back(0);
+    body.push_back(0);
+    body.push_back(0);
+    return body;
+}
+
+bool expect_png_load_failure(const fs::path& path, const char* label)
+{
+    mark2haru::Png_image image;
+    if (image.load_from_file(path)) {
+        std::cerr << "load unexpectedly succeeded for " << label << "\n";
+        return false;
+    }
+    if (image.loaded()) {
+        std::cerr << "image marked loaded after failure for " << label << "\n";
+        return false;
+    }
+    if (image.error().empty()) {
+        std::cerr << "no error message for " << label << "\n";
+        return false;
+    }
+    return true;
+}
+
 bool expect_png(
     const fs::path& path,
     int width,
@@ -242,6 +308,66 @@ int main(int argc, char** argv)
     if (!starts_with_pdf_header(pdf_path)) {
         std::cerr << "pdf header missing\n";
         return 14;
+    }
+
+    // Negative cases for the hardened decoder: each of these used to be
+    // either accepted silently or could trigger out-of-bounds arithmetic
+    // before the decoder was tightened up.
+    {
+        // Chunk before IHDR: spec violation.
+        const fs::path path = temp_dir / "before_ihdr.png";
+        std::vector<std::pair<std::array<char, 4>, std::vector<std::uint8_t>>> chunks = {
+            { {'P','L','T','E'}, { 0,0,0 } },
+            { {'I','H','D','R'}, ihdr_body(1, 1, 8, 0) },
+            { {'I','E','N','D'}, {} },
+        };
+        if (!write_raw_png(path, chunks)
+            || !expect_png_load_failure(path, "chunk before IHDR"))
+        {
+            return 15;
+        }
+    }
+    {
+        // Duplicate IHDR.
+        const fs::path path = temp_dir / "dup_ihdr.png";
+        std::vector<std::pair<std::array<char, 4>, std::vector<std::uint8_t>>> chunks = {
+            { {'I','H','D','R'}, ihdr_body(1, 1, 8, 0) },
+            { {'I','H','D','R'}, ihdr_body(2, 2, 8, 0) },
+            { {'I','E','N','D'}, {} },
+        };
+        if (!write_raw_png(path, chunks)
+            || !expect_png_load_failure(path, "duplicate IHDR"))
+        {
+            return 16;
+        }
+    }
+    {
+        // Width above the per-image dimension cap.
+        const fs::path path = temp_dir / "huge.png";
+        std::vector<std::pair<std::array<char, 4>, std::vector<std::uint8_t>>> chunks = {
+            { {'I','H','D','R'}, ihdr_body(1u << 30, 1, 8, 0) },
+            { {'I','E','N','D'}, {} },
+        };
+        if (!write_raw_png(path, chunks)
+            || !expect_png_load_failure(path, "oversize dimensions"))
+        {
+            return 17;
+        }
+    }
+    {
+        // Chunk length pointing past EOF.
+        const fs::path path = temp_dir / "trunc.png";
+        std::ofstream raw(path, std::ios::binary);
+        static constexpr std::array<std::uint8_t, 8> signature = { 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A };
+        raw.write(reinterpret_cast<const char*>(signature.data()), 8);
+        // chunk header announcing 1 GB of payload but no bytes follow.
+        write_u32_be(raw, 1u << 30);
+        raw.write("IHDR", 4);
+        raw.close();
+        if (!expect_png_load_failure(path, "truncated chunk"))
+        {
+            return 18;
+        }
     }
 
     return 0;

@@ -35,25 +35,21 @@ public:
     std::uint16_t glyph_for_codepoint(std::uint32_t codepoint) const;
     std::uint16_t advance_width_for_gid(std::uint16_t gid) const;
 
-    static std::uint16_t read_u16(const std::vector<std::uint8_t>& data, std::uint32_t offset);
-    static std::int16_t  read_i16(const std::vector<std::uint8_t>& data, std::uint32_t offset);
-    static std::uint32_t read_u32(const std::vector<std::uint8_t>& data, std::uint32_t offset);
-
 private:
     struct table_record_t
     {
-        std::uint32_t offset = 0;
-        std::uint32_t length = 0;
+        std::size_t offset = 0;
+        std::size_t length = 0;
     };
 
     struct cmap4_t
     {
-        std::uint32_t offset = 0;
+        std::size_t offset = 0;
     };
 
     struct cmap12_t
     {
-        std::uint32_t offset = 0;
+        std::size_t offset = 0;
     };
 
     std::filesystem::path m_source_path;
