@@ -293,24 +293,32 @@ bool render_markdown_to_pdf(
         return metrics->measure_text_width(font, text, size_pt);
     };
 
-    auto draw_line = [&](const line_t& line, double size_pt, double x_pt) {
-        double x = x_pt;
-        for (const auto& [text, style] : line.spans) {
-            const Pdf_font font = font_for(style);
-            writer.draw_text(x, cursor_y, size_pt, font, text);
-            x += measure(font, text, size_pt);
+    // Draws a sequence of lines starting at (x, y), advancing y by each
+    // line's height. Returns the y after the last line. Used by every
+    // block that draws text: paragraph/heading/list pass cursor_y in and
+    // store the result back; code/table pass a local box-relative y in
+    // and ignore the return.
+    auto draw_lines_at = [&](
+        const std::vector<line_t>& lines,
+        double size, double x, double y) -> double
+    {
+        for (const auto& line : lines) {
+            double tx = x;
+            for (const auto& [text, style] : line.spans) {
+                const Pdf_font font = font_for(style);
+                writer.draw_text(tx, y, size, font, text);
+                tx += measure(font, text, size);
+            }
+            y += line.height_pt;
         }
+        return y;
     };
 
     auto on_paragraph = [&](const paragraph_block_t& pb) {
         const auto lines = wrap_runs(pb.runs, content_width, options.body_size_pt,
                                      options.line_spacing, measure);
-        const double height = total_height(lines);
-        ensure_space(height + options.body_size_pt * 0.25);
-        for (const auto& line : lines) {
-            draw_line(line, options.body_size_pt, options.margin_left_pt);
-            cursor_y += line.height_pt;
-        }
+        ensure_space(total_height(lines) + options.body_size_pt * 0.25);
+        cursor_y = draw_lines_at(lines, options.body_size_pt, options.margin_left_pt, cursor_y);
         cursor_y += options.body_size_pt * 0.35;
     };
 
@@ -320,37 +328,26 @@ bool render_markdown_to_pdf(
         const double space_before = size * hm.space_before_factor;
         const double space_after = size * hm.space_after_factor;
         const auto lines = wrap_runs(hb.runs, content_width, size, 1.15, measure);
-        const double height = total_height(lines);
-        ensure_space(space_before + height + space_after);
+        ensure_space(space_before + total_height(lines) + space_after);
         cursor_y += space_before;
-        for (const auto& line : lines) {
-            draw_line(line, size, options.margin_left_pt);
-            cursor_y += line.height_pt;
-        }
+        cursor_y = draw_lines_at(lines, size, options.margin_left_pt, cursor_y);
         cursor_y += space_after;
     };
 
     auto on_list = [&](const list_block_t& lb) {
+        const double gap = options.body_size_pt * 0.55;
         for (size_t i = 0; i < lb.items.size(); ++i) {
             const std::string marker = list_marker(lb, i);
             const double marker_width = measure(Pdf_font::REGULAR, marker, options.body_size_pt);
-            const double gap = options.body_size_pt * 0.55;
             const double item_left = options.margin_left_pt + marker_width + gap;
             const double item_width = content_width - marker_width - gap;
             const auto lines = wrap_runs(lb.items[i].runs, item_width, options.body_size_pt,
                                          options.line_spacing, measure);
-            const double height = total_height(lines);
-            ensure_space(height + options.body_size_pt * 0.2);
+            ensure_space(total_height(lines) + options.body_size_pt * 0.2);
             writer.draw_text(
-                options.margin_left_pt,
-                cursor_y,
-                options.body_size_pt,
-                Pdf_font::REGULAR,
-                marker);
-            for (const auto& line : lines) {
-                draw_line(line, options.body_size_pt, item_left);
-                cursor_y += line.height_pt;
-            }
+                options.margin_left_pt, cursor_y,
+                options.body_size_pt, Pdf_font::REGULAR, marker);
+            cursor_y = draw_lines_at(lines, options.body_size_pt, item_left, cursor_y);
             cursor_y += options.body_size_pt * 0.15;
         }
         cursor_y += options.body_size_pt * 0.15;
@@ -365,15 +362,7 @@ bool render_markdown_to_pdf(
         ensure_space(height + options.body_size_pt * 0.2);
         writer.fill_rect(options.margin_left_pt, cursor_y, content_width, height,
                          code_block_fill);
-        double y = cursor_y + pad;
-        for (const auto& line : lines) {
-            double x = options.margin_left_pt + pad;
-            for (const auto& [text, style] : line.spans) {
-                writer.draw_text(x, y, size, Pdf_font::MONO, text);
-                x += measure(Pdf_font::MONO, text, size);
-            }
-            y += line.height_pt;
-        }
+        draw_lines_at(lines, size, options.margin_left_pt + pad, cursor_y + pad);
         writer.stroke_rect(options.margin_left_pt, cursor_y, content_width, height,
                            default_stroke, border_line_width);
         cursor_y += height + options.body_size_pt * 0.25;
@@ -424,17 +413,8 @@ bool render_markdown_to_pdf(
             for (size_t col = 0; col < column_count; ++col) {
                 writer.stroke_rect(x, cursor_y, col_width, row_height,
                                    default_stroke, border_line_width);
-                const auto& lines = cell_lines[row_idx][col];
-                double cell_y = cursor_y + cell_pad;
-                for (const auto& line : lines) {
-                    double text_x = x + cell_pad;
-                    for (const auto& [text, style] : line.spans) {
-                        const Pdf_font font = font_for(style);
-                        writer.draw_text(text_x, cell_y, cell_size, font, text);
-                        text_x += measure(font, text, cell_size);
-                    }
-                    cell_y += line.height_pt;
-                }
+                draw_lines_at(cell_lines[row_idx][col], cell_size,
+                              x + cell_pad, cursor_y + cell_pad);
                 x += col_width;
             }
             cursor_y += row_height;

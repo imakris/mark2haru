@@ -84,24 +84,29 @@ std::vector<fs::path> search_roots(const fs::path& font_root)
     };
     roots.insert(roots.end(), system_roots.begin(), system_roots.end());
 
+    // _dupenv_s on MSVC, std::getenv elsewhere — both yield a HOME string
+    // (or empty on failure) that we then treat identically.
+    std::string home_str;
 #if defined(_MSC_VER)
-    char* home = nullptr;
-    size_t home_len = 0;
-    if (_dupenv_s(&home, &home_len, "HOME") == 0 && home != nullptr) {
-        const fs::path home_path(home);
-        roots.push_back(home_path / ".fonts");
-        roots.push_back(home_path / ".local/share/fonts");
-        roots.push_back(home_path / "Library/Fonts");
-        free(home);
+    {
+        char* raw = nullptr;
+        size_t raw_len = 0;
+        if (_dupenv_s(&raw, &raw_len, "HOME") == 0 && raw != nullptr) {
+            home_str = raw;
+            free(raw);
+        }
     }
 #else
-    if (const char* home = std::getenv("HOME")) {
-        const fs::path home_path(home);
+    if (const char* raw = std::getenv("HOME")) {
+        home_str = raw;
+    }
+#endif
+    if (!home_str.empty()) {
+        const fs::path home_path(home_str);
         roots.push_back(home_path / ".fonts");
         roots.push_back(home_path / ".local/share/fonts");
         roots.push_back(home_path / "Library/Fonts");
     }
-#endif
 
     return roots;
 }

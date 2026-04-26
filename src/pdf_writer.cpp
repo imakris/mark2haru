@@ -634,28 +634,36 @@ bool Pdf_writer::save(const fs::path& path) const
         table.emit(ids.type0, type0.str());
     }
 
+    auto image_dict = [](int w, int h, const char* colorspace, int smask_id) {
+        std::ostringstream out;
+        out << " /Type /XObject /Subtype /Image /Width " << w
+            << " /Height " << h
+            << " /ColorSpace " << colorspace
+            << " /BitsPerComponent 8";
+        if (smask_id != 0) {
+            out << " /SMask " << smask_id << " 0 R";
+        }
+        return out.str();
+    };
+
     for (std::size_t i = 0; i < m_images.size(); ++i) {
         const auto& image = m_images[i].image;
         const auto& ids = image_objects[i];
+        const char* cs = image.color_components() == 1 ? "/DeviceGray" : "/DeviceRGB";
 
-        std::ostringstream image_dict;
-        image_dict
-            << " /Type /XObject /Subtype /Image /Width " << image.width_px()
-            << " /Height " << image.height_px() << " /ColorSpace "
-            << (image.color_components() == 1 ? "/DeviceGray" : "/DeviceRGB")
-            << " /BitsPerComponent 8";
-        if (image.has_alpha()) {
-            image_dict << " /SMask " << ids.mask << " 0 R";
-        }
-        table.emit(ids.image, build_stream_object(image.pixels(), image_dict.str()));
+        table.emit(
+            ids.image,
+            build_stream_object(
+                image.pixels(),
+                image_dict(image.width_px(), image.height_px(), cs,
+                           image.has_alpha() ? ids.mask : 0)));
 
         if (image.has_alpha()) {
-            std::ostringstream alpha_dict;
-            alpha_dict
-                << " /Type /XObject /Subtype /Image /Width " << image.width_px()
-                << " /Height " << image.height_px()
-                << " /ColorSpace /DeviceGray /BitsPerComponent 8";
-            table.emit(ids.mask, build_stream_object(image.alpha(), alpha_dict.str()));
+            table.emit(
+                ids.mask,
+                build_stream_object(
+                    image.alpha(),
+                    image_dict(image.width_px(), image.height_px(), "/DeviceGray", 0)));
         }
     }
 

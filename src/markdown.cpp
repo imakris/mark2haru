@@ -40,19 +40,20 @@ std::string rtrim(const std::string& s)
     return s.substr(0, end + 1);
 }
 
-// Find the next asterisk run whose length is exactly `run_len`, skipping runs
-// of other lengths. Used to prevent a single `*` italic from closing on the
-// first star of a nested `**bold**`, and similarly for `**`/`***`.
-size_t find_asterisk_run(std::string_view s, size_t start, size_t run_len)
+// Find the next run of `ch` whose length is exactly `run_len`, skipping
+// runs of other lengths. Used to keep a single `*` italic from closing on
+// the first star of a nested `**bold**`, and the same for `` ` `` / `*`
+// / `**` / `***`.
+size_t find_run_of_length(std::string_view s, size_t start, size_t run_len, char ch)
 {
     size_t pos = start;
     while (pos < s.size() && s[pos] != '\n') {
-        if (s[pos] != '*') {
+        if (s[pos] != ch) {
             ++pos;
             continue;
         }
         const size_t run_start = pos;
-        while (pos < s.size() && s[pos] == '*') {
+        while (pos < s.size() && s[pos] == ch) {
             ++pos;
         }
         if (pos - run_start == run_len) {
@@ -94,25 +95,6 @@ bool is_escapable(char c)
     return c == '\\' || c == '`' || c == '*' || c == '_' || c == '{' || c == '}'
         || c == '[' || c == ']' || c == '(' || c == ')' || c == '#' || c == '+'
         || c == '-' || c == '.' || c == '!' || c == '|' || c == '~';
-}
-
-size_t find_backtick_run(std::string_view s, size_t start, size_t run_len)
-{
-    size_t pos = start;
-    while (pos < s.size() && s[pos] != '\n') {
-        if (s[pos] != '`') {
-            ++pos;
-            continue;
-        }
-        const size_t run_start = pos;
-        while (pos < s.size() && s[pos] == '`') {
-            ++pos;
-        }
-        if (pos - run_start == run_len) {
-            return run_start;
-        }
-    }
-    return std::string::npos;
 }
 
 size_t find_link_close(std::string_view s, size_t open)
@@ -206,7 +188,7 @@ std::vector<inline_run_t> parse_inline(const std::string& text)
 
         if (text[i] == '*'
             && try_emphasis('*', [&](size_t s, size_t l) {
-                return find_asterisk_run(text, s, l);
+                return find_run_of_length(text, s, l, '*');
             })) {
             continue;
         }
@@ -223,7 +205,7 @@ std::vector<inline_run_t> parse_inline(const std::string& text)
             while (i + run_len < text.size() && text[i + run_len] == '`') {
                 ++run_len;
             }
-            const size_t close = find_backtick_run(text, i + run_len, run_len);
+            const size_t close = find_run_of_length(text, i + run_len, run_len, '`');
             if (close != std::string::npos) {
                 flush();
                 runs.push_back({ text.substr(i + run_len, close - i - run_len), Inline_style::CODE });
