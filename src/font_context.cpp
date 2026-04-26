@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <string>
+#include <system_error>
 #include <vector>
 
 namespace mark2haru {
@@ -45,7 +46,8 @@ bool try_dir(
 {
     for (const char* candidate : candidates) {
         const auto p = dir / candidate;
-        if (fs::exists(p)) {
+        std::error_code ec;
+        if (fs::exists(p, ec) && !ec) {
             out = p;
             return true;
         }
@@ -60,8 +62,12 @@ std::vector<fs::path> search_roots(const fs::path& font_root)
         roots.push_back(font_root);
         roots.push_back(font_root / "fonts");
     }
-    roots.push_back(fs::current_path());
-    roots.push_back(fs::current_path() / "fonts");
+    std::error_code ec;
+    const fs::path cwd = fs::current_path(ec);
+    if (!ec) {
+        roots.push_back(cwd);
+        roots.push_back(cwd / "fonts");
+    }
 
     const std::vector<fs::path> system_roots = {
         R"(C:\Windows\Fonts)",
@@ -144,7 +150,8 @@ fs::path Measurement_context::resolve_font_path(
     };
 
     if (!source.path.empty()) {
-        if (fs::is_regular_file(source.path)) {
+        std::error_code ec;
+        if (fs::is_regular_file(source.path, ec) && !ec) {
             return source.path;
         }
         if (auto resolved = search_dir(source.path); !resolved.empty()) {
