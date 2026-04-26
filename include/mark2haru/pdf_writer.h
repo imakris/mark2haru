@@ -65,7 +65,6 @@ private:
     {
         std::unordered_map<std::uint16_t, std::uint32_t> gid_to_unicode;
         std::unordered_set<std::uint16_t> used_glyphs;
-        bool used = false;
     };
 
     struct loaded_image_t

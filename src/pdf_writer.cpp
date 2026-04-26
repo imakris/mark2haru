@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <cmath>
 #include <cstdlib>
 #include <fstream>
@@ -11,6 +12,7 @@
 #include <ostream>
 #include <sstream>
 #include <string_view>
+#include <system_error>
 #include <utility>
 
 #include "miniz.h"
@@ -20,20 +22,28 @@ namespace {
 
 namespace fs = std::filesystem;
 
+// Locale-independent number formatting: std::ostringstream and std::printf
+// both honour the global LC_NUMERIC, which on a non-C locale would emit
+// `1,5` instead of `1.5` and produce an unparseable PDF. std::to_chars is
+// guaranteed to use '.' for the decimal separator regardless of locale.
 template <class T>
 std::string number_to_string(T value)
 {
-    // PDF parsers reject NaN/Inf; emit a syntactically valid "0" instead so
-    // a numerical bug in callers never produces an unparseable file.
-    if (!std::isfinite(static_cast<double>(value))) {
+    const double v = static_cast<double>(value);
+    if (!std::isfinite(v)) {
         return "0";
     }
-    std::ostringstream ss;
-    ss.setf(std::ios::fixed);
-    ss << std::setprecision(3) << value;
-    std::string out = ss.str();
+    char buf[64];
+    const auto result = std::to_chars(
+        std::begin(buf), std::end(buf),
+        v, std::chars_format::fixed, 3);
+    if (result.ec != std::errc{}) {
+        return "0";
+    }
+    std::string out(buf, result.ptr);
+
     if (out.find('.') != std::string::npos) {
-        const size_t last = out.find_last_not_of('0');
+        const std::size_t last = out.find_last_not_of('0');
         if (last != std::string::npos) {
             out.erase(last + 1);
         }
@@ -361,7 +371,6 @@ void Pdf_writer::draw_text(
     }
 
     auto& slot = m_fonts[static_cast<std::size_t>(font)];
-    slot.used = true;
     const auto& face = m_metrics->font_face(font);
     const std::string encoded = utf8_to_hex_cid_string(face, slot, text);
     auto& out = current_content();
