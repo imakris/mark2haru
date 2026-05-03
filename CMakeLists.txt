@@ -12,6 +12,31 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+set(MARK2HARU_BUNDLED_FONT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/fonts"
+    CACHE INTERNAL "Directory containing mark2haru bundled runtime fonts")
+set(MARK2HARU_BUNDLED_FONT_FILES
+    DejaVuSans.ttf
+    DejaVuSans-Bold.ttf
+    DejaVuSans-Oblique.ttf
+    DejaVuSans-BoldOblique.ttf
+    DejaVuSansMono.ttf
+    CACHE INTERNAL "mark2haru bundled runtime font filenames")
+
+function(mark2haru_copy_bundled_fonts target destination_dir)
+    add_custom_command(TARGET ${target} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${destination_dir}"
+        VERBATIM
+    )
+    foreach(_mark2haru_font IN LISTS MARK2HARU_BUNDLED_FONT_FILES)
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${MARK2HARU_BUNDLED_FONT_DIR}/${_mark2haru_font}"
+                "${destination_dir}/${_mark2haru_font}"
+            VERBATIM
+        )
+    endforeach()
+endfunction()
+
 add_library(mark2haru_core STATIC
     src/font_context.cpp
     src/markdown.cpp
@@ -62,25 +87,11 @@ if(MARK2HARU_BUILD_CLI)
     else()
         target_compile_options(mark2haru PRIVATE -Wall -Wextra -Wpedantic)
     endif()
+    if(MINGW)
+        target_link_options(mark2haru PRIVATE -municode)
+    endif()
 
-    add_custom_command(TARGET mark2haru POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:mark2haru>/fonts
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            ${CMAKE_CURRENT_SOURCE_DIR}/fonts/DejaVuSans.ttf
-            $<TARGET_FILE_DIR:mark2haru>/fonts/DejaVuSans.ttf
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            ${CMAKE_CURRENT_SOURCE_DIR}/fonts/DejaVuSans-Bold.ttf
-            $<TARGET_FILE_DIR:mark2haru>/fonts/DejaVuSans-Bold.ttf
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            ${CMAKE_CURRENT_SOURCE_DIR}/fonts/DejaVuSans-Oblique.ttf
-            $<TARGET_FILE_DIR:mark2haru>/fonts/DejaVuSans-Oblique.ttf
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            ${CMAKE_CURRENT_SOURCE_DIR}/fonts/DejaVuSans-BoldOblique.ttf
-            $<TARGET_FILE_DIR:mark2haru>/fonts/DejaVuSans-BoldOblique.ttf
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            ${CMAKE_CURRENT_SOURCE_DIR}/fonts/DejaVuSansMono.ttf
-            $<TARGET_FILE_DIR:mark2haru>/fonts/DejaVuSansMono.ttf
-    )
+    mark2haru_copy_bundled_fonts(mark2haru "$<TARGET_FILE_DIR:mark2haru>/fonts")
 endif()
 
 install(TARGETS mark2haru_core
@@ -92,6 +103,11 @@ install(TARGETS mark2haru_core
 
 install(DIRECTORY include/
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+)
+
+install(DIRECTORY fonts/
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/mark2haru/fonts
+    FILES_MATCHING PATTERN "*.ttf"
 )
 
 install(EXPORT mark2haruTargets
@@ -124,6 +140,9 @@ if(MARK2HARU_BUILD_TESTS)
     add_executable(test_failure_paths
         tests/test_failure_paths.cpp
     )
+    add_executable(test_pdf_writer
+        tests/test_pdf_writer.cpp
+    )
     add_executable(test_png
         tests/test_png.cpp
     )
@@ -132,18 +151,25 @@ if(MARK2HARU_BUILD_TESTS)
     )
 
     target_link_libraries(test_failure_paths PRIVATE mark2haru_core)
+    target_link_libraries(test_pdf_writer PRIVATE mark2haru_core)
     target_link_libraries(test_png PRIVATE mark2haru_core)
     target_link_libraries(test_markdown PRIVATE mark2haru_core)
+    target_include_directories(test_pdf_writer PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/miniz
+    )
     target_include_directories(test_png PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/third_party/miniz
     )
+    mark2haru_copy_bundled_fonts(test_pdf_writer "$<TARGET_FILE_DIR:test_pdf_writer>/fonts")
 
     if(MSVC)
         target_compile_options(test_failure_paths PRIVATE /W4 /permissive-)
+        target_compile_options(test_pdf_writer PRIVATE /W4 /permissive-)
         target_compile_options(test_png PRIVATE /W4 /permissive-)
         target_compile_options(test_markdown PRIVATE /W4 /permissive-)
     else()
         target_compile_options(test_failure_paths PRIVATE -Wall -Wextra -Wpedantic)
+        target_compile_options(test_pdf_writer PRIVATE -Wall -Wextra -Wpedantic)
         target_compile_options(test_png PRIVATE -Wall -Wextra -Wpedantic)
         target_compile_options(test_markdown PRIVATE -Wall -Wextra -Wpedantic)
     endif()
@@ -187,6 +213,10 @@ if(MARK2HARU_BUILD_TESTS)
     add_test(
         NAME png_roundtrip
         COMMAND test_png
+    )
+    add_test(
+        NAME pdf_writer_primitives
+        COMMAND test_pdf_writer
     )
     add_test(
         NAME failure_paths

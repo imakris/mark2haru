@@ -36,6 +36,13 @@ public:
     void stroke_rect(
         double x_pt, double y_top_pt, double w_pt, double h_pt,
         const color_t& color, double line_width_pt);
+    void stroke_line(
+        double x1_pt,
+        double y1_top_pt,
+        double x2_pt,
+        double y2_top_pt,
+        const color_t& color,
+        double line_width_pt);
     void fill_rect(
         double x_pt, double y_top_pt, double w_pt, double h_pt,
         const color_t& color);
@@ -45,6 +52,13 @@ public:
         double size_pt,
         Pdf_font font,
         const std::string& text);
+    void draw_text(
+        double x_pt,
+        double y_top_pt,
+        double size_pt,
+        Pdf_font font,
+        const std::string& text,
+        const color_t& color);
     bool draw_png(double x_pt, double y_top_pt, double w_pt, double h_pt, const Png_image& image);
     bool draw_png(
         double x_pt, double y_top_pt, double w_pt, double h_pt,

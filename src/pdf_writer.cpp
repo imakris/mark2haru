@@ -370,6 +370,17 @@ void Pdf_writer::draw_text(
     Pdf_font font,
     const std::string& text)
 {
+    draw_text(x_pt, y_top_pt, size_pt, font, text, { 0.0, 0.0, 0.0 });
+}
+
+void Pdf_writer::draw_text(
+    double x_pt,
+    double y_top_pt,
+    double size_pt,
+    Pdf_font font,
+    const std::string& text,
+    const color_t& color)
+{
     if (!m_metrics) {
         return;
     }
@@ -378,6 +389,8 @@ void Pdf_writer::draw_text(
     const auto& face = m_metrics->font_face(font);
     const std::string encoded = utf8_to_hex_cid_string(face, slot, text);
     auto& out = current_content();
+    out += "q\n";
+    append_color(out, color, false);
     out += "BT\n";
     out += font_resource_name(font);
     out.push_back(' ');
@@ -386,7 +399,7 @@ void Pdf_writer::draw_text(
     out += number_to_string(x_pt) + " " + number_to_string(m_page_height_pt - y_top_pt - size_pt)
         + " Td\n";
     out += encoded;
-    out += " Tj\nET\n";
+    out += " Tj\nET\nQ\n";
 }
 
 bool Pdf_writer::draw_png(double x_pt, double y_top_pt, double w_pt, double h_pt, const Png_image& image)
@@ -478,6 +491,25 @@ void Pdf_writer::stroke_rect(
     out += number_to_string(line_width_pt) + " w\n";
     out += number_to_string(x_pt) + " " + number_to_string(m_page_height_pt - y_top_pt - h_pt)
         + " " + number_to_string(w_pt) + " " + number_to_string(h_pt) + " re\nS\n";
+    out += "Q\n";
+}
+
+void Pdf_writer::stroke_line(
+    double x1_pt,
+    double y1_top_pt,
+    double x2_pt,
+    double y2_top_pt,
+    const color_t& color,
+    double line_width_pt)
+{
+    auto& out = current_content();
+    out += "q\n";
+    append_color(out, color, true);
+    out += number_to_string(line_width_pt) + " w\n";
+    out += number_to_string(x1_pt) + " " + number_to_string(m_page_height_pt - y1_top_pt)
+        + " m\n";
+    out += number_to_string(x2_pt) + " " + number_to_string(m_page_height_pt - y2_top_pt)
+        + " l\nS\n";
     out += "Q\n";
 }
 
