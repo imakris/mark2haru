@@ -1,6 +1,7 @@
 #include <mark2haru/render.h>
 
 #include <mark2haru/pdf_writer.h>
+#include <mark2haru/png_image.h>
 
 #include "io_helpers.h"
 #include "utf8_decode.h"
@@ -361,6 +362,42 @@ bool render_markdown_to_pdf(
         cursor_y += options.body_size_pt * 0.15;
     };
 
+    auto on_image = [&](const Image_content_block& ib) {
+        Png_image image;
+        if (!image.load_from_file(fs::path(ib.path)) || image.width_px() <= 0) {
+            const std::string placeholder = ib.alt_text.empty()
+                ? ib.path
+                : ib.alt_text;
+            ensure_space(options.body_size_pt * 1.4);
+            writer.draw_text(
+                options.margin_left_pt,
+                cursor_y,
+                options.body_size_pt * 0.9,
+                Pdf_font::ITALIC,
+                placeholder,
+                { 0.6, 0.0, 0.0 });
+            cursor_y += options.body_size_pt * 1.4;
+            return;
+        }
+
+        const double natural_width_pt = static_cast<double>(image.width_px()) * 72.0 / 96.0;
+        const double natural_height_pt = static_cast<double>(image.height_px()) * 72.0 / 96.0;
+        double image_width_pt = std::min(natural_width_pt, content_width);
+        double image_height_pt = image_width_pt * natural_height_pt / natural_width_pt;
+
+        const double available_height =
+            options.page_height_pt - options.margin_bottom_pt - options.margin_top_pt;
+        if (image_height_pt > available_height) {
+            const double scale = available_height / image_height_pt;
+            image_width_pt *= scale;
+            image_height_pt = available_height;
+        }
+
+        ensure_space(image_height_pt + options.body_size_pt * 0.25);
+        writer.draw_png(options.margin_left_pt, cursor_y, image_width_pt, image_height_pt, image);
+        cursor_y += image_height_pt + options.body_size_pt * 0.25;
+    };
+
     auto on_code = [&](const Code_block& cb) {
         const double size = options.body_size_pt * 0.92;
         const double pad = options.body_size_pt * 0.45;
@@ -475,6 +512,7 @@ bool render_markdown_to_pdf(
                 on_paragraph,
                 on_heading,
                 on_list,
+                on_image,
                 on_code,
                 on_table,
                 on_page_break,

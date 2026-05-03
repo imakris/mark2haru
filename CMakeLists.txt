@@ -43,6 +43,7 @@ add_library(mark2haru_core STATIC
     src/pdf_writer.cpp
     src/png_image.cpp
     src/render.cpp
+    src/table_layout.cpp
     src/ttf_font.cpp
     # miniz_zip.c is intentionally excluded - we only use compress2/compressBound
     # from miniz.c (with deflate from miniz_tdef.c). The zip archive support

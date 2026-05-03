@@ -51,6 +51,12 @@ struct Code_block
     std::string text;
 };
 
+struct Image_content_block
+{
+    std::string path;
+    std::string alt_text;
+};
+
 struct Table_cell
 {
     std::vector<Inline_run> runs;
@@ -75,6 +81,7 @@ using Block = std::variant<
     Paragraph_block,
     Heading_block,
     List_block,
+    Image_content_block,
     Code_block,
     Table_block,
     Page_break_block>;

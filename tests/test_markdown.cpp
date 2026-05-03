@@ -1,5 +1,6 @@
 #include <mark2haru/markdown.h>
 
+#include <climits>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -10,6 +11,7 @@ using mark2haru::Inline_style;
 using mark2haru::Block;
 using mark2haru::Code_block;
 using mark2haru::Heading_block;
+using mark2haru::Image_content_block;
 using mark2haru::Inline_run;
 using mark2haru::List_block;
 using mark2haru::Page_break_block;
@@ -170,6 +172,22 @@ int main()
     }
 
     {
+        const auto blocks = parse_markdown("999999999999999999999999999999. Large\n");
+        if (blocks.size() != 1) {
+            std::fprintf(stderr, "expected 1 overflowing ordered list block, got %zu\n", blocks.size());
+            return 21;
+        }
+        const auto* list = std::get_if<List_block>(&blocks[0]);
+        if (!list || !list->ordered || list->start_number != INT_MAX || list->items.size() != 1) {
+            std::fprintf(stderr, "unexpected overflowing ordered list shape\n");
+            return 22;
+        }
+        if (!expect_text_equals(list->items[0].runs, "Large")) {
+            return 23;
+        }
+    }
+
+    {
         // Fenced code block preserves interior whitespace and does not
         // parse inline markup inside the body.
         const auto blocks = parse_markdown(
@@ -179,20 +197,33 @@ int main()
             "```\n");
         if (blocks.size() != 1) {
             std::fprintf(stderr, "expected 1 code block, got %zu\n", blocks.size());
-            return 21;
+            return 24;
         }
         const auto* code = std::get_if<Code_block>(&blocks[0]);
         if (!code) {
             std::fprintf(stderr, "expected code block\n");
-            return 22;
+            return 25;
         }
         if (code->language != "text") {
             std::fprintf(stderr, "unexpected code language: '%s'\n", code->language.c_str());
-            return 23;
+            return 26;
         }
         if (code->text != "line one\n  *not italic*") {
             std::fprintf(stderr, "unexpected code body: '%s'\n", code->text.c_str());
-            return 24;
+            return 27;
+        }
+    }
+
+    {
+        const auto blocks = parse_markdown("![Alt text](image.png)");
+        if (blocks.size() != 1) {
+            std::fprintf(stderr, "expected 1 image block, got %zu\n", blocks.size());
+            return 28;
+        }
+        const auto* image = std::get_if<Image_content_block>(&blocks[0]);
+        if (!image || image->path != "image.png" || image->alt_text != "Alt text") {
+            std::fprintf(stderr, "unexpected image block\n");
+            return 29;
         }
     }
 
@@ -206,24 +237,24 @@ int main()
             "| B | fail |\n");
         if (blocks.size() != 1) {
             std::fprintf(stderr, "expected 1 table block, got %zu\n", blocks.size());
-            return 25;
+            return 30;
         }
         const auto* table = std::get_if<Table_block>(&blocks[0]);
         if (!table || !table->has_header || table->rows.size() != 3) {
             std::fprintf(stderr, "unexpected table shape\n");
-            return 26;
+            return 31;
         }
         if (table->rows[0].cells.size() != 2 ||
             table->rows[1].cells.size() != 2 ||
             table->rows[2].cells.size() != 2)
         {
             std::fprintf(stderr, "unexpected table column shape\n");
-            return 27;
+            return 32;
         }
         if (!expect_text_equals(table->rows[0].cells[0].runs, "Item") ||
             !expect_text_equals(table->rows[2].cells[1].runs, "fail"))
         {
-            return 28;
+            return 33;
         }
     }
 
@@ -237,14 +268,14 @@ int main()
             "after\n");
         if (blocks.size() != 3) {
             std::fprintf(stderr, "expected 3 blocks for page-break case, got %zu\n", blocks.size());
-            return 29;
+            return 34;
         }
         if (!std::get_if<Paragraph_block >(&blocks[0]) ||
             !std::get_if<Page_break_block>(&blocks[1]) ||
             !std::get_if<Paragraph_block >(&blocks[2]))
         {
             std::fprintf(stderr, "unexpected block shape around page break\n");
-            return 30;
+            return 35;
         }
     }
 

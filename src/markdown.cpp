@@ -3,6 +3,7 @@
 #include "io_helpers.h"
 
 #include <cctype>
+#include <climits>
 #include <charconv>
 #include <string_view>
 #include <system_error>
@@ -252,6 +253,7 @@ struct Classified_line
         HEADING,
         BULLET_ITEM,
         ORDERED_ITEM,
+        IMAGE,
         TABLE_ROW,
         TABLE_SEPARATOR,
         PAGE_BREAK,
@@ -299,13 +301,12 @@ Classified_line classify_line(const std::string& line)
     }
     if (pos > 0 && pos + 1 < trimmed.size() && trimmed[pos] == '.' && trimmed[pos + 1] == ' ') {
         // std::atoi is undefined on overflow; std::from_chars reports it
-        // explicitly. On overflow or any other failure we fall back to 1
-        // so the list still renders with a valid marker.
+        // explicitly. Clamp overflow so callers get a deterministic marker.
         int start = 1;
         const char* begin = trimmed.data();
         const std::from_chars_result result = std::from_chars(begin, begin + pos, start);
         if (result.ec != std::errc{}) {
-            start = 1;
+            start = INT_MAX;
         }
         return {
             Classified_line::Type::ORDERED_ITEM,
@@ -313,6 +314,16 @@ Classified_line classify_line(const std::string& line)
             0,
             start
         };
+    }
+
+    if (trimmed.rfind("![", 0) == 0) {
+        const size_t alt_end = trimmed.find("](", 2);
+        if (alt_end != std::string::npos) {
+            const size_t path_end = find_link_close(trimmed, alt_end + 1);
+            if (path_end != std::string::npos) {
+                return { Classified_line::Type::IMAGE, trimmed, 0, 0 };
+            }
+        }
     }
 
     if (trimmed.size() >= 2 && trimmed.front() == '|' && trimmed.back() == '|') {
@@ -355,6 +366,18 @@ std::vector<std::string> split_table_cells(const std::string& row)
         i = pipe + 1;
     }
     return cells;
+}
+
+Image_content_block parse_image_line(const std::string& line)
+{
+    const size_t alt_start = 2;
+    const size_t alt_end = line.find("](", alt_start);
+    const size_t path_start = alt_end + 2;
+    const size_t path_end = find_link_close(line, alt_end + 1);
+    return {
+        line.substr(path_start, path_end - path_start),
+        line.substr(alt_start, alt_end - alt_start)
+    };
 }
 
 } // namespace
@@ -477,6 +500,12 @@ std::vector<Block> parse_markdown(const std::string& input)
                 blocks.push_back(std::move(lb));
                 break;
             }
+
+            case Classified_line::Type::IMAGE:
+                flush_paragraph();
+                blocks.push_back(parse_image_line(trimmed));
+                ++i;
+                break;
 
             case Classified_line::Type::TABLE_ROW: {
                 if (i + 1 < lines.size()
