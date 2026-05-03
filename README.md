@@ -152,6 +152,12 @@ It also includes Greek and Cyrillic to exercise Unicode text beyond Windows-1252
 - Stream compression is size-aware rather than forced; very small objects may remain uncompressed
   if that produces a smaller file overall.
 
+## Contributing
+
+Contributions should follow the Varinomics coding style guideline. The canonical guideline is
+published by Varinomics at <https://github.com/Varinomics/varinomics-standards>; general project
+information is available at <https://varinomics.com/>.
+
 ## Attribution
 
 - Bundled DejaVu fonts are distributed under the DejaVu / Bitstream Vera license. See the
