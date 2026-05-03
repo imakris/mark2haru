@@ -1,9 +1,11 @@
 #include <mark2haru/markdown.h>
 
+#include "io_helpers.h"
+
 #include <cctype>
-#include <cstdlib>
-#include <iterator>
+#include <charconv>
 #include <string_view>
+#include <system_error>
 
 namespace mark2haru {
 namespace {
@@ -37,43 +39,20 @@ std::string rtrim(const std::string& s)
     return s.substr(0, end + 1);
 }
 
-std::vector<std::string> split_lines(const std::string& text)
-{
-    std::vector<std::string> lines;
-    size_t pos = 0;
-    while (pos <= text.size()) {
-        const size_t nl = text.find('\n', pos);
-        if (nl == std::string::npos) {
-            auto line = text.substr(pos);
-            if (!line.empty() && line.back() == '\r') {
-                line.pop_back();
-            }
-            lines.push_back(std::move(line));
-            break;
-        }
-        auto line = text.substr(pos, nl - pos);
-        if (!line.empty() && line.back() == '\r') {
-            line.pop_back();
-        }
-        lines.push_back(std::move(line));
-        pos = nl + 1;
-    }
-    return lines;
-}
-
-// Find the next asterisk run whose length is exactly `run_len`, skipping runs
-// of other lengths. Used to prevent a single `*` italic from closing on the
-// first star of a nested `**bold**`, and similarly for `**`/`***`.
-size_t find_asterisk_run(std::string_view s, size_t start, size_t run_len)
+// Find the next run of `ch` whose length is exactly `run_len`, skipping
+// runs of other lengths. Used to keep a single `*` italic from closing on
+// the first star of a nested `**bold**`, and the same for `` ` `` / `*`
+// / `**` / `***`.
+size_t find_run_of_length(std::string_view s, size_t start, size_t run_len, char ch)
 {
     size_t pos = start;
     while (pos < s.size() && s[pos] != '\n') {
-        if (s[pos] != '*') {
+        if (s[pos] != ch) {
             ++pos;
             continue;
         }
         const size_t run_start = pos;
-        while (pos < s.size() && s[pos] == '*') {
+        while (pos < s.size() && s[pos] == ch) {
             ++pos;
         }
         if (pos - run_start == run_len) {
@@ -115,25 +94,6 @@ bool is_escapable(char c)
     return c == '\\' || c == '`' || c == '*' || c == '_' || c == '{' || c == '}'
         || c == '[' || c == ']' || c == '(' || c == ')' || c == '#' || c == '+'
         || c == '-' || c == '.' || c == '!' || c == '|' || c == '~';
-}
-
-size_t find_backtick_run(std::string_view s, size_t start, size_t run_len)
-{
-    size_t pos = start;
-    while (pos < s.size() && s[pos] != '\n') {
-        if (s[pos] != '`') {
-            ++pos;
-            continue;
-        }
-        const size_t run_start = pos;
-        while (pos < s.size() && s[pos] == '`') {
-            ++pos;
-        }
-        if (pos - run_start == run_len) {
-            return run_start;
-        }
-    }
-    return std::string::npos;
 }
 
 size_t find_link_close(std::string_view s, size_t open)
@@ -180,6 +140,44 @@ std::vector<inline_run_t> parse_inline(const std::string& text)
         return pos == 0 || !is_word_char(text[pos - 1]);
     };
 
+    // Emphasis greedily prefers the longest delimiter run (***, **, *) so
+    // nested markup like ***bold italic*** binds correctly.
+    auto try_emphasis = [&](char delim, auto&& find_close) -> bool {
+        for (size_t len : { size_t{3}, size_t{2}, size_t{1} }) {
+            // For a single-char run, refuse if it's actually the start of
+            // a longer run (avoids `**bold**` opening as `*` italic).
+            if (len == 1 && i + 1 < text.size() && text[i + 1] == delim) {
+                continue;
+            }
+            if (i + len > text.size()) {
+                continue;
+            }
+            bool prefix_ok = true;
+            for (size_t k = 0; k < len; ++k) {
+                if (text[i + k] != delim) {
+                    prefix_ok = false;
+                    break;
+                }
+            }
+            if (!prefix_ok) {
+                continue;
+            }
+            const size_t close = find_close(i + len, len);
+            if (close == std::string::npos) {
+                continue;
+            }
+            const Inline_style style =
+                len == 3 ? Inline_style::BOLD_ITALIC :
+                len == 2 ? Inline_style::BOLD :
+                           Inline_style::ITALIC;
+            flush();
+            runs.push_back({ text.substr(i + len, close - i - len), style });
+            i = close + len;
+            return true;
+        }
+        return false;
+    };
+
     while (i < text.size()) {
         if (text[i] == '\\' && i + 1 < text.size() && is_escapable(text[i + 1])) {
             current.push_back(text[i + 1]);
@@ -187,64 +185,18 @@ std::vector<inline_run_t> parse_inline(const std::string& text)
             continue;
         }
 
-        if (starts_with(text, i, "***")) {
-            const size_t close = find_asterisk_run(text, i + 3, 3);
-            if (close != std::string::npos) {
-                flush();
-                runs.push_back({ text.substr(i + 3, close - i - 3), Inline_style::BOLD_ITALIC });
-                i = close + 3;
-                continue;
-            }
+        if (text[i] == '*'
+            && try_emphasis('*', [&](size_t s, size_t l) {
+                return find_run_of_length(text, s, l, '*');
+            })) {
+            continue;
         }
 
-        if (starts_with(text, i, "**")) {
-            const size_t close = find_asterisk_run(text, i + 2, 2);
-            if (close != std::string::npos) {
-                flush();
-                runs.push_back({ text.substr(i + 2, close - i - 2), Inline_style::BOLD });
-                i = close + 2;
-                continue;
-            }
-        }
-
-        if (text[i] == '*' && !starts_with(text, i, "**")) {
-            const size_t close = find_asterisk_run(text, i + 1, 1);
-            if (close != std::string::npos) {
-                flush();
-                runs.push_back({ text.substr(i + 1, close - i - 1), Inline_style::ITALIC });
-                i = close + 1;
-                continue;
-            }
-        }
-
-        if (starts_with(text, i, "___") && can_open_underscore(i)) {
-            const size_t close = find_closing_underscore(text, i + 3, 3);
-            if (close != std::string::npos) {
-                flush();
-                runs.push_back({ text.substr(i + 3, close - i - 3), Inline_style::BOLD_ITALIC });
-                i = close + 3;
-                continue;
-            }
-        }
-
-        if (starts_with(text, i, "__") && can_open_underscore(i)) {
-            const size_t close = find_closing_underscore(text, i + 2, 2);
-            if (close != std::string::npos) {
-                flush();
-                runs.push_back({ text.substr(i + 2, close - i - 2), Inline_style::BOLD });
-                i = close + 2;
-                continue;
-            }
-        }
-
-        if (text[i] == '_' && !starts_with(text, i, "__") && can_open_underscore(i)) {
-            const size_t close = find_closing_underscore(text, i + 1, 1);
-            if (close != std::string::npos) {
-                flush();
-                runs.push_back({ text.substr(i + 1, close - i - 1), Inline_style::ITALIC });
-                i = close + 1;
-                continue;
-            }
+        if (text[i] == '_' && can_open_underscore(i)
+            && try_emphasis('_', [&](size_t s, size_t l) {
+                return find_closing_underscore(text, s, l);
+            })) {
+            continue;
         }
 
         if (text[i] == '`') {
@@ -252,7 +204,7 @@ std::vector<inline_run_t> parse_inline(const std::string& text)
             while (i + run_len < text.size() && text[i + run_len] == '`') {
                 ++run_len;
             }
-            const size_t close = find_backtick_run(text, i + run_len, run_len);
+            const size_t close = find_run_of_length(text, i + run_len, run_len, '`');
             if (close != std::string::npos) {
                 flush();
                 runs.push_back({ text.substr(i + run_len, close - i - run_len), Inline_style::CODE });
@@ -349,11 +301,20 @@ classified_line_t classify_line(const std::string& line)
         ++pos;
     }
     if (pos > 0 && pos + 1 < trimmed.size() && trimmed[pos] == '.' && trimmed[pos + 1] == ' ') {
+        // std::atoi is undefined on overflow; std::from_chars reports it
+        // explicitly. On overflow or any other failure we fall back to 1
+        // so the list still renders with a valid marker.
+        int start = 1;
+        const char* begin = trimmed.data();
+        const std::from_chars_result result = std::from_chars(begin, begin + pos, start);
+        if (result.ec != std::errc{}) {
+            start = 1;
+        }
         return {
             classified_line_t::Type::ORDERED_ITEM,
             trim(trimmed.substr(pos + 2)),
             0,
-            std::atoi(trimmed.substr(0, pos).c_str())
+            start
         };
     }
 

@@ -1,5 +1,6 @@
 #include <mark2haru/png_image.h>
 
+#include "io_helpers.h"
 #include "miniz.h"
 
 #include <algorithm>
@@ -7,13 +8,19 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
-#include <fstream>
-#include <iterator>
+#include <limits>
 
 namespace mark2haru {
 namespace {
 
 namespace fs = std::filesystem;
+
+// Reasonable caps to bound work and memory for malicious or accidentally
+// pathological inputs. PNG IHDR allows up to 2^31-1 in each dimension; we
+// reject anything larger than the cap below before allocating.
+constexpr std::size_t MAX_IMAGE_DIMENSION = 32768;
+constexpr std::size_t MAX_IMAGE_PIXELS    = 64u * 1024u * 1024u; // 64M pixels
+constexpr std::size_t MAX_IDAT_BYTES      = 256u * 1024u * 1024u; // 256 MiB
 
 std::uint32_t read_be32(const std::vector<std::uint8_t>& bytes, std::size_t offset)
 {
@@ -29,14 +36,25 @@ std::uint16_t read_be16(const std::vector<std::uint8_t>& bytes, std::size_t offs
         | static_cast<std::uint16_t>(bytes[offset + 1]));
 }
 
-bool read_file_bytes(const fs::path& path, std::vector<std::uint8_t>& out)
+// Adds two size_t values and reports overflow. Returns true on success;
+// `result` is undefined on overflow.
+bool checked_add(std::size_t a, std::size_t b, std::size_t& result)
 {
-    std::ifstream in(path, std::ios::binary);
-    if (!in) {
+    if (b > std::numeric_limits<std::size_t>::max() - a) {
         return false;
     }
-    out.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
-    return !out.empty();
+    result = a + b;
+    return true;
+}
+
+// Multiplies two size_t values and reports overflow.
+bool checked_mul(std::size_t a, std::size_t b, std::size_t& result)
+{
+    if (a != 0 && b > std::numeric_limits<std::size_t>::max() / a) {
+        return false;
+    }
+    result = a * b;
+    return true;
 }
 
 std::uint8_t paeth_predictor(std::uint8_t a, std::uint8_t b, std::uint8_t c)
@@ -111,6 +129,11 @@ std::uint16_t packed_sample(const std::vector<std::uint8_t>& row, std::size_t pi
     return static_cast<std::uint16_t>((row[byte_index] >> shift) & mask);
 }
 
+std::uint16_t read_sample(const std::vector<std::uint8_t>& row, std::size_t offset, std::uint8_t bit_depth)
+{
+    return bit_depth == 16 ? read_be16(row, offset) : row[offset];
+}
+
 std::uint8_t sample_to_u8(std::uint16_t sample, std::uint8_t bit_depth)
 {
     if (bit_depth == 8) {
@@ -146,23 +169,40 @@ bool Png_image::decode_png(const std::vector<std::uint8_t>& file_bytes)
     bool has_gray_key = false;
     bool has_rgb_key = false;
 
-    while (pos + 8 <= file_bytes.size()) {
-        const std::uint32_t chunk_len = read_be32(file_bytes, pos);
+    while (file_bytes.size() - pos >= 8) {
+        const std::uint32_t chunk_len_u32 = read_be32(file_bytes, pos);
+        const std::size_t chunk_len = static_cast<std::size_t>(chunk_len_u32);
         const std::string chunk_type(reinterpret_cast<const char*>(&file_bytes[pos + 4]), 4);
         pos += 8;
-        if (pos + chunk_len + 4 > file_bytes.size()) {
+        // Need chunk_len bytes of payload + 4 bytes of CRC. Done with
+        // overflow-safe arithmetic so a malicious chunk_len near SIZE_MAX
+        // can't bypass the bound.
+        std::size_t chunk_end = 0;
+        if (!checked_add(chunk_len, 4, chunk_end)
+            || chunk_end > file_bytes.size() - pos)
+        {
             m_error = "Corrupt PNG chunk";
             return false;
         }
 
         const std::uint8_t* chunk_data = &file_bytes[pos];
         if (chunk_type == "IHDR") {
+            if (seen_ihdr) {
+                m_error = "Duplicate PNG header";
+                return false;
+            }
             if (chunk_len != 13) {
                 m_error = "Invalid PNG header";
                 return false;
             }
-            m_width_px = static_cast<int>(read_be32(file_bytes, pos));
-            m_height_px = static_cast<int>(read_be32(file_bytes, pos + 4));
+            const std::uint32_t w = read_be32(file_bytes, pos);
+            const std::uint32_t h = read_be32(file_bytes, pos + 4);
+            if (w == 0 || h == 0 || w > MAX_IMAGE_DIMENSION || h > MAX_IMAGE_DIMENSION) {
+                m_error = "PNG dimensions out of range";
+                return false;
+            }
+            m_width_px = static_cast<int>(w);
+            m_height_px = static_cast<int>(h);
             bit_depth = file_bytes[pos + 8];
             color_type = file_bytes[pos + 9];
             const std::uint8_t compression = file_bytes[pos + 10];
@@ -174,6 +214,13 @@ bool Png_image::decode_png(const std::vector<std::uint8_t>& file_bytes)
                 return false;
             }
             seen_ihdr = true;
+        }
+        else
+        if (!seen_ihdr) {
+            // Spec: IHDR must come first. Reject any non-IHDR ancillary or
+            // critical chunk before it.
+            m_error = "PNG chunk before IHDR";
+            return false;
         }
         else
         if (chunk_type == "PLTE") {
@@ -207,6 +254,10 @@ bool Png_image::decode_png(const std::vector<std::uint8_t>& file_bytes)
         }
         else
         if (chunk_type == "IDAT") {
+            if (chunk_len > MAX_IDAT_BYTES - idat.size()) {
+                m_error = "PNG IDAT exceeds size cap";
+                return false;
+            }
             idat.insert(idat.end(), chunk_data, chunk_data + chunk_len);
         }
         else
@@ -237,7 +288,31 @@ bool Png_image::decode_png(const std::vector<std::uint8_t>& file_bytes)
         return false;
     }
 
-    const std::size_t decoded_size = static_cast<std::size_t>(m_height_px) * (encoded_row_size + 1);
+    // Each scanline is `encoded_row_size + 1` (one filter byte). The total
+    // decoded size and the output pixel/alpha buffers are checked for
+    // overflow against size_t and against the per-image cap.
+    std::size_t pixel_count = 0;
+    std::size_t decoded_size = 0;
+    std::size_t row_with_filter = 0;
+    if (!checked_mul(static_cast<std::size_t>(m_width_px),
+                     static_cast<std::size_t>(m_height_px),
+                     pixel_count)
+        || pixel_count > MAX_IMAGE_PIXELS
+        || !checked_add(encoded_row_size, 1, row_with_filter)
+        || !checked_mul(static_cast<std::size_t>(m_height_px),
+                        row_with_filter,
+                        decoded_size))
+    {
+        m_error = "PNG too large to decode";
+        return false;
+    }
+    if (decoded_size > std::numeric_limits<mz_ulong>::max()
+        || idat.size() > std::numeric_limits<mz_ulong>::max())
+    {
+        m_error = "PNG too large to decode";
+        return false;
+    }
+
     std::vector<std::uint8_t> decoded(decoded_size);
     mz_ulong decoded_len = static_cast<mz_ulong>(decoded.size());
     mz_ulong idat_len = static_cast<mz_ulong>(idat.size());
@@ -255,9 +330,14 @@ bool Png_image::decode_png(const std::vector<std::uint8_t>& file_bytes)
     const bool use_alpha = color_type == 4 || color_type == 6 || has_gray_key || has_rgb_key || !palette_alpha.empty();
     const int output_components = (color_type == 0 || color_type == 4) ? 1 : 3;
 
-    m_pixels.assign(static_cast<std::size_t>(m_height_px) * static_cast<std::size_t>(m_width_px) * static_cast<std::size_t>(output_components), 0);
+    std::size_t pixel_buffer_size = 0;
+    if (!checked_mul(pixel_count, static_cast<std::size_t>(output_components), pixel_buffer_size)) {
+        m_error = "PNG too large to decode";
+        return false;
+    }
+    m_pixels.assign(pixel_buffer_size, 0);
     if (use_alpha) {
-        m_alpha.assign(static_cast<std::size_t>(m_height_px) * static_cast<std::size_t>(m_width_px), 255);
+        m_alpha.assign(pixel_count, 255);
     }
     m_color_components = output_components;
 
@@ -308,21 +388,21 @@ bool Png_image::decode_png(const std::vector<std::uint8_t>& file_bytes)
             }
         };
 
+        // Stride between same-color samples within one pixel (in bytes).
+        // For sub-byte bit depths the per-pixel stride is meaningless: we
+        // always read those via packed_sample(), and color_type 3 is the
+        // only color_type that allows them.
+        const std::size_t step = bit_depth == 16 ? 2u : 1u;
+        const int channels = encoded_components(color_type);
+        const std::size_t pixel_stride = static_cast<std::size_t>(channels) * step;
+
         if (color_type == 0) {
             for (int x = 0; x < m_width_px; ++x) {
-                std::uint16_t sample = 0;
-                if (bit_depth < 8) {
-                    sample = packed_sample(cur, static_cast<std::size_t>(x), bit_depth);
-                }
-                else
-                if (bit_depth == 16) {
-                    sample = read_be16(cur, static_cast<std::size_t>(x) * 2u);
-                }
-                else {
-                    sample = cur[static_cast<std::size_t>(x)];
-                }
-                const std::uint8_t gray = sample_to_u8(sample, bit_depth);
-                m_pixels[pixel_row_offset + static_cast<std::size_t>(x)] = gray;
+                const std::size_t xz = static_cast<std::size_t>(x);
+                const std::uint16_t sample = bit_depth < 8
+                    ? packed_sample(cur, xz, bit_depth)
+                    : read_sample(cur, xz * step, bit_depth);
+                m_pixels[pixel_row_offset + xz] = sample_to_u8(sample, bit_depth);
                 if (has_gray_key) {
                     write_alpha(x, sample == transparency_gray ? 0 : 255);
                 }
@@ -331,10 +411,10 @@ bool Png_image::decode_png(const std::vector<std::uint8_t>& file_bytes)
         else
         if (color_type == 2) {
             for (int x = 0; x < m_width_px; ++x) {
-                const std::size_t src_offset = static_cast<std::size_t>(x) * (bit_depth == 16 ? 6u : 3u);
-                const std::uint16_t r = bit_depth == 16 ? read_be16(cur, src_offset) : cur[src_offset];
-                const std::uint16_t g = bit_depth == 16 ? read_be16(cur, src_offset + (bit_depth == 16 ? 2u : 1u)) : cur[src_offset + 1];
-                const std::uint16_t b = bit_depth == 16 ? read_be16(cur, src_offset + (bit_depth == 16 ? 4u : 2u)) : cur[src_offset + 2];
+                const std::size_t src_offset = static_cast<std::size_t>(x) * pixel_stride;
+                const std::uint16_t r = read_sample(cur, src_offset,            bit_depth);
+                const std::uint16_t g = read_sample(cur, src_offset + step,     bit_depth);
+                const std::uint16_t b = read_sample(cur, src_offset + 2 * step, bit_depth);
                 const std::size_t dst = output_row_offset + static_cast<std::size_t>(x) * 3u;
                 m_pixels[dst    ] = sample_to_u8(r, bit_depth);
                 m_pixels[dst + 1] = sample_to_u8(g, bit_depth);
@@ -347,15 +427,16 @@ bool Png_image::decode_png(const std::vector<std::uint8_t>& file_bytes)
         else
         if (color_type == 3) {
             for (int x = 0; x < m_width_px; ++x) {
+                const std::size_t xz = static_cast<std::size_t>(x);
                 const std::uint16_t index = bit_depth < 8
-                    ? packed_sample(cur, static_cast<std::size_t>(x), bit_depth)
-                    : cur[static_cast<std::size_t>(x)];
+                    ? packed_sample(cur, xz, bit_depth)
+                    : cur[xz];
                 const std::size_t palette_offset = static_cast<std::size_t>(index) * 3u;
                 if (palette_offset + 2 >= palette.size()) {
                     m_error = "Invalid PNG palette index";
                     return false;
                 }
-                const std::size_t dst = output_row_offset + static_cast<std::size_t>(x) * 3u;
+                const std::size_t dst = output_row_offset + xz * 3u;
                 m_pixels[dst    ] = palette[palette_offset    ];
                 m_pixels[dst + 1] = palette[palette_offset + 1];
                 m_pixels[dst + 2] = palette[palette_offset + 2];
@@ -368,9 +449,9 @@ bool Png_image::decode_png(const std::vector<std::uint8_t>& file_bytes)
         else
         if (color_type == 4) {
             for (int x = 0; x < m_width_px; ++x) {
-                const std::size_t src_offset = static_cast<std::size_t>(x) * (bit_depth == 16 ? 4u : 2u);
-                const std::uint16_t gray = bit_depth == 16 ? read_be16(cur, src_offset) : cur[src_offset];
-                const std::uint16_t alpha = bit_depth == 16 ? read_be16(cur, src_offset + (bit_depth == 16 ? 2u : 1u)) : cur[src_offset + 1];
+                const std::size_t src_offset = static_cast<std::size_t>(x) * pixel_stride;
+                const std::uint16_t gray  = read_sample(cur, src_offset,        bit_depth);
+                const std::uint16_t alpha = read_sample(cur, src_offset + step, bit_depth);
                 m_pixels[pixel_row_offset + static_cast<std::size_t>(x)] = sample_to_u8(gray, bit_depth);
                 write_alpha(x, sample_to_u8(alpha, bit_depth));
             }
@@ -378,13 +459,13 @@ bool Png_image::decode_png(const std::vector<std::uint8_t>& file_bytes)
         else
         if (color_type == 6) {
             for (int x = 0; x < m_width_px; ++x) {
-                const std::size_t src_offset = static_cast<std::size_t>(x) * (bit_depth == 16 ? 8u : 4u);
-                const std::uint16_t r = bit_depth == 16 ? read_be16(cur, src_offset) : cur[src_offset];
-                const std::uint16_t g = bit_depth == 16 ? read_be16(cur, src_offset + (bit_depth == 16 ? 2u : 1u)) : cur[src_offset + 1];
-                const std::uint16_t b = bit_depth == 16 ? read_be16(cur, src_offset + (bit_depth == 16 ? 4u : 2u)) : cur[src_offset + 2];
-                const std::uint16_t a = bit_depth == 16 ? read_be16(cur, src_offset + (bit_depth == 16 ? 6u : 3u)) : cur[src_offset + 3];
+                const std::size_t src_offset = static_cast<std::size_t>(x) * pixel_stride;
+                const std::uint16_t r = read_sample(cur, src_offset,            bit_depth);
+                const std::uint16_t g = read_sample(cur, src_offset + step,     bit_depth);
+                const std::uint16_t b = read_sample(cur, src_offset + 2 * step, bit_depth);
+                const std::uint16_t a = read_sample(cur, src_offset + 3 * step, bit_depth);
                 const std::size_t dst = output_row_offset + static_cast<std::size_t>(x) * 3u;
-                m_pixels[dst] = sample_to_u8(r, bit_depth);
+                m_pixels[dst    ] = sample_to_u8(r, bit_depth);
                 m_pixels[dst + 1] = sample_to_u8(g, bit_depth);
                 m_pixels[dst + 2] = sample_to_u8(b, bit_depth);
                 write_alpha(x, sample_to_u8(a, bit_depth));

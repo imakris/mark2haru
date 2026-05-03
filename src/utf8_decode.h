@@ -12,6 +12,7 @@
 
 namespace mark2haru
 {
+
 namespace utf8
 {
 

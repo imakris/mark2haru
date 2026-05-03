@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <string>
+#include <system_error>
 #include <vector>
 
 namespace mark2haru {
@@ -13,26 +14,40 @@ namespace {
 
 namespace fs = std::filesystem;
 
-const std::array<std::vector<std::string>, 5>& candidate_sets()
+struct slot_descriptor_t
 {
-    static const std::array<std::vector<std::string>, 5> candidates = {{
-        { "DejaVuSans.ttf", "NotoSans-Regular.ttf", "LiberationSans-Regular.ttf", "Arial.ttf", "arial.ttf" },
-        { "DejaVuSans-Bold.ttf", "NotoSans-Bold.ttf", "LiberationSans-Bold.ttf", "Arial Bold.ttf", "arialbd.ttf" },
-        { "DejaVuSans-Oblique.ttf", "NotoSans-Italic.ttf", "LiberationSans-Italic.ttf", "Arial Italic.ttf", "ariali.ttf" },
-        { "DejaVuSans-BoldOblique.ttf", "NotoSans-BoldItalic.ttf", "LiberationSans-BoldItalic.ttf", "Arial Bold Italic.ttf", "arialbi.ttf" },
-        { "DejaVuSansMono.ttf", "NotoSansMono-Regular.ttf", "LiberationMono-Regular.ttf", "Courier New.ttf", "cour.ttf" },
-    }};
-    return candidates;
+    const char* base14;
+    const char* tag;
+    std::array<const char*, 5> candidates;
+};
+
+constexpr std::array<slot_descriptor_t, 5> slot_descriptors = {{
+    { "Helvetica",             "MHRegular",
+      { "DejaVuSans.ttf", "NotoSans-Regular.ttf", "LiberationSans-Regular.ttf", "Arial.ttf", "arial.ttf" } },
+    { "Helvetica-Bold",        "MHBold",
+      { "DejaVuSans-Bold.ttf", "NotoSans-Bold.ttf", "LiberationSans-Bold.ttf", "Arial Bold.ttf", "arialbd.ttf" } },
+    { "Helvetica-Oblique",     "MHItalic",
+      { "DejaVuSans-Oblique.ttf", "NotoSans-Italic.ttf", "LiberationSans-Italic.ttf", "Arial Italic.ttf", "ariali.ttf" } },
+    { "Helvetica-BoldOblique", "MHBoldItalic",
+      { "DejaVuSans-BoldOblique.ttf", "NotoSans-BoldItalic.ttf", "LiberationSans-BoldItalic.ttf", "Arial Bold Italic.ttf", "arialbi.ttf" } },
+    { "Courier",               "MHMono",
+      { "DejaVuSansMono.ttf", "NotoSansMono-Regular.ttf", "LiberationMono-Regular.ttf", "Courier New.ttf", "cour.ttf" } },
+}};
+
+const slot_descriptor_t& slot_descriptor(Pdf_font font)
+{
+    return slot_descriptors[static_cast<std::size_t>(font)];
 }
 
 bool try_dir(
-    const fs::path&                 dir,
-    const std::vector<std::string>& candidates,
-    fs::path&                       out)
+    const fs::path&                       dir,
+    const std::array<const char*, 5>&     candidates,
+    fs::path&                             out)
 {
-    for (const auto& candidate : candidates) {
+    for (const char* candidate : candidates) {
         const auto p = dir / candidate;
-        if (fs::exists(p)) {
+        std::error_code ec;
+        if (fs::exists(p, ec) && !ec) {
             out = p;
             return true;
         }
@@ -47,8 +62,12 @@ std::vector<fs::path> search_roots(const fs::path& font_root)
         roots.push_back(font_root);
         roots.push_back(font_root / "fonts");
     }
-    roots.push_back(fs::current_path());
-    roots.push_back(fs::current_path() / "fonts");
+    std::error_code ec;
+    const fs::path cwd = fs::current_path(ec);
+    if (!ec) {
+        roots.push_back(cwd);
+        roots.push_back(cwd / "fonts");
+    }
 
     const std::vector<fs::path> system_roots = {
         R"(C:\Windows\Fonts)",
@@ -65,24 +84,29 @@ std::vector<fs::path> search_roots(const fs::path& font_root)
     };
     roots.insert(roots.end(), system_roots.begin(), system_roots.end());
 
+    // _dupenv_s on MSVC, std::getenv elsewhere: both yield a HOME string
+    // (or empty on failure) that we then treat identically.
+    std::string home_str;
 #if defined(_MSC_VER)
-    char* home = nullptr;
-    size_t home_len = 0;
-    if (_dupenv_s(&home, &home_len, "HOME") == 0 && home != nullptr) {
-        const fs::path home_path(home);
-        roots.push_back(home_path / ".fonts");
-        roots.push_back(home_path / ".local/share/fonts");
-        roots.push_back(home_path / "Library/Fonts");
-        free(home);
+    {
+        char* raw = nullptr;
+        size_t raw_len = 0;
+        if (_dupenv_s(&raw, &raw_len, "HOME") == 0 && raw != nullptr) {
+            home_str = raw;
+            free(raw);
+        }
     }
 #else
-    if (const char* home = std::getenv("HOME")) {
-        const fs::path home_path(home);
+    if (const char* raw = std::getenv("HOME")) {
+        home_str = raw;
+    }
+#endif
+    if (!home_str.empty()) {
+        const fs::path home_path(home_str);
         roots.push_back(home_path / ".fonts");
         roots.push_back(home_path / ".local/share/fonts");
         roots.push_back(home_path / "Library/Fonts");
     }
-#endif
 
     return roots;
 }
@@ -91,55 +115,28 @@ std::vector<fs::path> search_roots(const fs::path& font_root)
 
 font_family_config_t font_family_config_t::briefutil_default()
 {
-    font_family_config_t config;
-    config.regular     = font_source_t::from_base14("Helvetica");
-    config.bold        = font_source_t::from_base14("Helvetica-Bold");
-    config.italic      = font_source_t::from_base14("Helvetica-Oblique");
-    config.bold_italic = font_source_t::from_base14("Helvetica-BoldOblique");
-    config.mono        = font_source_t::from_base14("Courier");
-    return config;
+    return {};
 }
 
 font_source_t Measurement_context::slot_source(const font_family_config_t& family, Pdf_font font)
 {
-    switch (font) {
-        case Pdf_font::REGULAR:
-            return family.regular.empty() ? font_source_t::from_base14(default_base14_name(font)) : family.regular;
-        case Pdf_font::BOLD:
-            return family.bold.empty() ? font_source_t::from_base14(default_base14_name(font)) : family.bold;
-        case Pdf_font::ITALIC:
-            return family.italic.empty() ? font_source_t::from_base14(default_base14_name(font)) : family.italic;
-        case Pdf_font::BOLD_ITALIC:
-            return family.bold_italic.empty() ? font_source_t::from_base14(default_base14_name(font)) : family.bold_italic;
-        case Pdf_font::MONO:
-            return family.mono.empty() ? font_source_t::from_base14(default_base14_name(font)) : family.mono;
-        default:
-            return font_source_t::from_base14(default_base14_name(Pdf_font::REGULAR));
-    }
+    const font_source_t* slots[] = {
+        &family.regular, &family.bold, &family.italic, &family.bold_italic, &family.mono,
+    };
+    const font_source_t& configured = *slots[static_cast<std::size_t>(font)];
+    return configured.empty()
+        ? font_source_t::from_base14(slot_descriptor(font).base14)
+        : configured;
 }
 
 std::string Measurement_context::default_base14_name(Pdf_font font)
 {
-    switch (font) {
-        case Pdf_font::REGULAR:     return "Helvetica";
-        case Pdf_font::BOLD:        return "Helvetica-Bold";
-        case Pdf_font::ITALIC:      return "Helvetica-Oblique";
-        case Pdf_font::BOLD_ITALIC: return "Helvetica-BoldOblique";
-        case Pdf_font::MONO:        return "Courier";
-        default:                    return "Helvetica";
-    }
+    return slot_descriptor(font).base14;
 }
 
 std::string Measurement_context::slot_tag_name(Pdf_font font)
 {
-    switch (font) {
-        case Pdf_font::REGULAR:     return "MHRegular";
-        case Pdf_font::BOLD:        return "MHBold";
-        case Pdf_font::ITALIC:      return "MHItalic";
-        case Pdf_font::BOLD_ITALIC: return "MHBoldItalic";
-        case Pdf_font::MONO:        return "MHMono";
-        default:                    return "MHRegular";
-    }
+    return slot_descriptor(font).tag;
 }
 
 fs::path Measurement_context::resolve_font_path(
@@ -147,7 +144,7 @@ fs::path Measurement_context::resolve_font_path(
     const fs::path& font_root,
     Pdf_font font)
 {
-    const auto& candidates = candidate_sets()[static_cast<std::size_t>(font)];
+    const auto& candidates = slot_descriptor(font).candidates;
 
     auto search_dir = [&](const fs::path& dir) -> fs::path {
         fs::path out;
@@ -158,7 +155,8 @@ fs::path Measurement_context::resolve_font_path(
     };
 
     if (!source.path.empty()) {
-        if (fs::is_regular_file(source.path)) {
+        std::error_code ec;
+        if (fs::is_regular_file(source.path, ec) && !ec) {
             return source.path;
         }
         if (auto resolved = search_dir(source.path); !resolved.empty()) {
@@ -194,7 +192,6 @@ Measurement_context::Measurement_context(
             m_error = "Unable to load font file for " + default_base14_name(font);
             return;
         }
-        slot.source_path = path;
         slot.tag_name = slot_tag_name(font);
     }
 
@@ -204,11 +201,6 @@ Measurement_context::Measurement_context(
 const True_type_font& Measurement_context::font_face(Pdf_font font) const
 {
     return m_slots[static_cast<std::size_t>(font)].face;
-}
-
-const fs::path& Measurement_context::font_path(Pdf_font font) const
-{
-    return m_slots[static_cast<std::size_t>(font)].source_path;
 }
 
 const std::string& Measurement_context::font_tag_name(Pdf_font font) const

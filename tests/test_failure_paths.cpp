@@ -1,8 +1,10 @@
 #include <mark2haru/render.h>
 #include <mark2haru/ttf_font.h>
 
+#include <clocale>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -163,6 +165,91 @@ bool expect_render_font_failure(const fs::path& temp_dir)
     return true;
 }
 
+// PDF parsers require '.' as the decimal separator. setlocale to a locale
+// that uses ',' when one is available and verify that rendering still
+// emits a parseable PDF. That means number formatting in the writer is
+// genuinely locale-independent.
+bool expect_render_locale_independent(const fs::path& temp_dir, const fs::path& font_root_dir)
+{
+    const char* candidate_locales[] = {
+        "de_DE.UTF-8",
+        "de_DE.utf8",
+        "de_DE",
+        "fr_FR.UTF-8",
+        "fr_FR.utf8",
+        "fr_FR",
+    };
+    const char* applied = nullptr;
+    for (const char* loc : candidate_locales) {
+        if (std::setlocale(LC_NUMERIC, loc) != nullptr) {
+            const std::lconv* conv = std::localeconv();
+            if (conv && conv->decimal_point && std::strcmp(conv->decimal_point, ",") == 0) {
+                applied = loc;
+                break;
+            }
+        }
+    }
+    if (!applied) {
+        std::setlocale(LC_NUMERIC, "C");
+        std::fprintf(stderr, "skipping locale-safety test: no decimal-comma locale available\n");
+        return true;
+    }
+
+    mark2haru::render_options_t options;
+    options.font_root_dir = font_root_dir;
+
+    const fs::path out_path = temp_dir / "locale_test.pdf";
+    std::string error;
+    const bool ok = mark2haru::render_markdown_to_pdf(
+        "x\n",
+        out_path,
+        options,
+        error);
+    std::setlocale(LC_NUMERIC, "C");
+
+    if (!ok) {
+        std::fprintf(stderr, "locale render failed (locale=%s): %s\n", applied, error.c_str());
+        return false;
+    }
+
+    const std::vector<std::uint8_t> bytes = read_file_bytes(out_path);
+    if (bytes.empty()) {
+        std::fprintf(stderr, "locale render produced empty file\n");
+        return false;
+    }
+    // PDF allows '.' but never ',' as a decimal separator inside number
+    // tokens. Scan the file but skip over stream..endstream blocks because
+    // those are arbitrary compressed bytes that can coincidentally match
+    // a `d,d` pattern. Inside the PDF dictionary tokens we control, any
+    // float emitted with ',' as the separator is a locale-honouring bug.
+    const std::string raw(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+    std::size_t scan = 0;
+    while (scan < raw.size()) {
+        const std::size_t stream_pos = raw.find("stream\n", scan);
+        const std::size_t scan_end = stream_pos == std::string::npos ? raw.size() : stream_pos;
+        for (std::size_t i = scan + 1; i + 1 < scan_end; ++i) {
+            const unsigned char a = static_cast<unsigned char>(raw[i - 1]);
+            const unsigned char b = static_cast<unsigned char>(raw[i]);
+            const unsigned char c = static_cast<unsigned char>(raw[i + 1]);
+            if (a >= '0' && a <= '9' && b == ',' && c >= '0' && c <= '9') {
+                std::fprintf(stderr,
+                    "found locale-formatted float `%c,%c` in PDF dict (locale=%s)\n",
+                    static_cast<char>(a), static_cast<char>(c), applied);
+                return false;
+            }
+        }
+        if (stream_pos == std::string::npos) {
+            break;
+        }
+        const std::size_t end_pos = raw.find("\nendstream", stream_pos);
+        if (end_pos == std::string::npos) {
+            break;
+        }
+        scan = end_pos + std::string("\nendstream").size();
+    }
+    return true;
+}
+
 bool expect_render_save_failure(const fs::path& temp_dir, const fs::path& font_root_dir)
 {
     mark2haru::render_options_t options;
@@ -229,6 +316,9 @@ int main(int argc, char** argv)
     }
     if (!expect_render_save_failure(temp_dir, fonts_dir)) {
         return 9;
+    }
+    if (!expect_render_locale_independent(temp_dir, fonts_dir)) {
+        return 10;
     }
 
     return 0;
