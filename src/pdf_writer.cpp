@@ -2,6 +2,8 @@
 
 #include "utf8_decode.h"
 
+#include "miniz.h"
+
 #include <algorithm>
 #include <array>
 #include <charconv>
@@ -13,8 +15,6 @@
 #include <string_view>
 #include <system_error>
 #include <utility>
-
-#include "miniz.h"
 
 namespace mark2haru {
 namespace {
@@ -75,10 +75,10 @@ double clamp_unit(double v)
 
 std::string hex_byte(std::uint8_t byte)
 {
-    static constexpr char digits[] = "0123456789ABCDEF";
+    static constexpr char k_digits[] = "0123456789ABCDEF";
     std::string out;
-    out.push_back(digits[(byte >> 4) & 0xF]);
-    out.push_back(digits[byte & 0xF]);
+    out.push_back(k_digits[(byte >> 4) & 0xF]);
+    out.push_back(k_digits[byte & 0xF]);
     return out;
 }
 
@@ -158,7 +158,7 @@ std::string& Pdf_writer::current_content()
     return current_page().content;
 }
 
-Pdf_writer::page_t& Pdf_writer::current_page()
+Pdf_writer::Page& Pdf_writer::current_page()
 {
     if (m_pages.empty()) {
         begin_page();
@@ -168,7 +168,7 @@ Pdf_writer::page_t& Pdf_writer::current_page()
 
 void Pdf_writer::begin_page()
 {
-    m_pages.push_back(page_t{});
+    m_pages.push_back(Page{});
 }
 
 void Pdf_writer::append_color(std::string& out, const color_t& color, bool stroke)
@@ -194,7 +194,7 @@ std::string Pdf_writer::font_resource_name(Pdf_font font)
     }
 }
 
-std::vector<Pdf_font> Pdf_writer::used_fonts(const std::array<loaded_font_t, 5>& fonts)
+std::vector<Pdf_font> Pdf_writer::used_fonts(const std::array<Loaded_font, 5>& fonts)
 {
     std::vector<Pdf_font> out;
     for (std::size_t i = 0; i < fonts.size(); ++i) {
@@ -338,7 +338,7 @@ private:
 
 std::string Pdf_writer::utf8_to_hex_cid_string(
     const True_type_font& font,
-    loaded_font_t& loaded,
+    Loaded_font& loaded,
     const std::string& text)
 {
     std::vector<std::uint16_t> gids;
@@ -409,7 +409,7 @@ bool Pdf_writer::draw_png(double x_pt, double y_top_pt, double w_pt, double h_pt
     }
 
     const std::size_t image_index = m_images.size();
-    loaded_image_t stored;
+    Loaded_image stored;
     stored.image = image;
     stored.resource_name = "/Im" + std::to_string(image_index + 1);
     m_images.push_back(std::move(stored));
@@ -438,7 +438,7 @@ bool Pdf_writer::draw_png(
     return draw_png(x_pt, y_top_pt, w_pt, h_pt, image);
 }
 
-std::string Pdf_writer::make_to_unicode_cmap(const loaded_font_t& font)
+std::string Pdf_writer::make_to_unicode_cmap(const Loaded_font& font)
 {
     std::ostringstream cmap;
     cmap << "/CIDInit /ProcSet findresource begin\n"
@@ -538,7 +538,8 @@ bool Pdf_writer::save(const fs::path& path) const
 
     const auto used_font_ids = used_fonts(m_fonts);
 
-    struct font_object_ids_t {
+    struct font_object_ids_t
+    {
         int type0 = 0;
         int file = 0;
         int descriptor = 0;
@@ -554,7 +555,8 @@ bool Pdf_writer::save(const fs::path& path) const
         f.to_unicode = table.reserve();
     }
 
-    struct image_object_ids_t {
+    struct image_object_ids_t
+    {
         int image = 0;
         int mask = 0;
     };
@@ -566,7 +568,8 @@ bool Pdf_writer::save(const fs::path& path) const
         }
     }
 
-    struct page_object_ids_t {
+    struct page_object_ids_t
+    {
         int content = 0;
         int page = 0;
     };
@@ -704,7 +707,7 @@ bool Pdf_writer::save(const fs::path& path) const
     }
 
     for (std::size_t i = 0; i < m_pages.size(); ++i) {
-        const page_t& page = m_pages[i];
+        const Page& page = m_pages[i];
         const auto& ids = page_objects[i];
 
         table.emit(ids.content, build_stream_object(page.content));

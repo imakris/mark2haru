@@ -18,9 +18,9 @@ namespace fs = std::filesystem;
 // Reasonable caps to bound work and memory for malicious or accidentally
 // pathological inputs. PNG IHDR allows up to 2^31-1 in each dimension; we
 // reject anything larger than the cap below before allocating.
-constexpr std::size_t MAX_IMAGE_DIMENSION = 32768;
-constexpr std::size_t MAX_IMAGE_PIXELS    = 64u * 1024u * 1024u; // 64M pixels
-constexpr std::size_t MAX_IDAT_BYTES      = 256u * 1024u * 1024u; // 256 MiB
+constexpr std::size_t k_max_image_dimension = 32768;
+constexpr std::size_t k_max_image_pixels    = 64u * 1024u * 1024u; // 64M pixels
+constexpr std::size_t k_max_idat_bytes      = 256u * 1024u * 1024u; // 256 MiB
 
 std::uint32_t read_be32(const std::vector<std::uint8_t>& bytes, std::size_t offset)
 {
@@ -197,7 +197,9 @@ bool Png_image::decode_png(const std::vector<std::uint8_t>& file_bytes)
             }
             const std::uint32_t w = read_be32(file_bytes, pos);
             const std::uint32_t h = read_be32(file_bytes, pos + 4);
-            if (w == 0 || h == 0 || w > MAX_IMAGE_DIMENSION || h > MAX_IMAGE_DIMENSION) {
+            if (w == 0 || h == 0
+                || w > k_max_image_dimension || h > k_max_image_dimension)
+            {
                 m_error = "PNG dimensions out of range";
                 return false;
             }
@@ -254,7 +256,7 @@ bool Png_image::decode_png(const std::vector<std::uint8_t>& file_bytes)
         }
         else
         if (chunk_type == "IDAT") {
-            if (chunk_len > MAX_IDAT_BYTES - idat.size()) {
+            if (chunk_len > k_max_idat_bytes - idat.size()) {
                 m_error = "PNG IDAT exceeds size cap";
                 return false;
             }
@@ -297,7 +299,7 @@ bool Png_image::decode_png(const std::vector<std::uint8_t>& file_bytes)
     if (!checked_mul(static_cast<std::size_t>(m_width_px),
                      static_cast<std::size_t>(m_height_px),
                      pixel_count)
-        || pixel_count > MAX_IMAGE_PIXELS
+        || pixel_count > k_max_image_pixels
         || !checked_add(encoded_row_size, 1, row_with_filter)
         || !checked_mul(static_cast<std::size_t>(m_height_px),
                         row_with_filter,

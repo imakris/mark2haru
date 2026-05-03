@@ -10,11 +10,6 @@
 namespace mark2haru {
 namespace {
 
-bool starts_with(std::string_view s, size_t pos, std::string_view prefix)
-{
-    return pos + prefix.size() <= s.size() && s.substr(pos, prefix.size()) == prefix;
-}
-
 bool is_word_char(char c)
 {
     return std::isalnum(static_cast<unsigned char>(c)) != 0;
@@ -123,9 +118,9 @@ size_t find_link_close(std::string_view s, size_t open)
     return std::string::npos;
 }
 
-std::vector<inline_run_t> parse_inline(const std::string& text)
+std::vector<Inline_run> parse_inline(const std::string& text)
 {
-    std::vector<inline_run_t> runs;
+    std::vector<Inline_run> runs;
     std::string current;
     size_t i = 0;
 
@@ -249,8 +244,10 @@ std::vector<inline_run_t> parse_inline(const std::string& text)
     return runs;
 }
 
-struct classified_line_t {
-    enum class Type {
+struct Classified_line
+{
+    enum class Type
+    {
         EMPTY,
         HEADING,
         BULLET_ITEM,
@@ -265,19 +262,19 @@ struct classified_line_t {
     int list_number = 0;
 };
 
-classified_line_t classify_line(const std::string& line)
+Classified_line classify_line(const std::string& line)
 {
     const std::string trimmed = trim(line);
     if (trimmed.empty()) {
-        return { classified_line_t::Type::EMPTY, {}, 0, 0 };
+        return { Classified_line::Type::EMPTY, {}, 0, 0 };
     }
 
     if (trimmed == "<!-- pagebreak -->") {
-        return { classified_line_t::Type::PAGE_BREAK, {}, 0, 0 };
+        return { Classified_line::Type::PAGE_BREAK, {}, 0, 0 };
     }
 
     if (trimmed.rfind("```", 0) == 0) {
-        return { classified_line_t::Type::TEXT, trimmed, 0, 0 };
+        return { Classified_line::Type::TEXT, trimmed, 0, 0 };
     }
 
     if (trimmed.rfind('#', 0) == 0) {
@@ -286,14 +283,14 @@ classified_line_t classify_line(const std::string& line)
             ++level;
         }
         if (level > 0 && level < static_cast<int>(trimmed.size()) && trimmed[level] == ' ') {
-            return { classified_line_t::Type::HEADING, trim(trimmed.substr(level + 1)), level, 0 };
+            return { Classified_line::Type::HEADING, trim(trimmed.substr(level + 1)), level, 0 };
         }
     }
 
     if (trimmed.size() >= 2
         && (trimmed[0] == '-' || trimmed[0] == '*' || trimmed[0] == '+')
         && trimmed[1] == ' ') {
-        return { classified_line_t::Type::BULLET_ITEM, trim(trimmed.substr(2)), 0, 0 };
+        return { Classified_line::Type::BULLET_ITEM, trim(trimmed.substr(2)), 0, 0 };
     }
 
     size_t pos = 0;
@@ -311,7 +308,7 @@ classified_line_t classify_line(const std::string& line)
             start = 1;
         }
         return {
-            classified_line_t::Type::ORDERED_ITEM,
+            Classified_line::Type::ORDERED_ITEM,
             trim(trimmed.substr(pos + 2)),
             0,
             start
@@ -327,14 +324,14 @@ classified_line_t classify_line(const std::string& line)
             }
         }
         return {
-            separator ? classified_line_t::Type::TABLE_SEPARATOR : classified_line_t::Type::TABLE_ROW,
+            separator ? Classified_line::Type::TABLE_SEPARATOR : Classified_line::Type::TABLE_ROW,
             trimmed,
             0,
             0
         };
     }
 
-    return { classified_line_t::Type::TEXT, rtrim(line), 0, 0 };
+    return { Classified_line::Type::TEXT, rtrim(line), 0, 0 };
 }
 
 std::vector<std::string> split_table_cells(const std::string& row)
@@ -362,9 +359,9 @@ std::vector<std::string> split_table_cells(const std::string& row)
 
 } // namespace
 
-std::vector<block_t> parse_markdown(const std::string& input)
+std::vector<Block> parse_markdown(const std::string& input)
 {
-    std::vector<block_t> blocks;
+    std::vector<Block> blocks;
     const auto lines = split_lines(input);
     size_t i = 0;
     std::string paragraph_accum;
@@ -373,7 +370,7 @@ std::vector<block_t> parse_markdown(const std::string& input)
         if (paragraph_accum.empty()) {
             return;
         }
-        paragraph_block_t pb;
+        Paragraph_block pb;
         pb.runs = parse_inline(paragraph_accum);
         blocks.push_back(std::move(pb));
         paragraph_accum.clear();
@@ -384,7 +381,7 @@ std::vector<block_t> parse_markdown(const std::string& input)
 
         if (trimmed.rfind("```", 0) == 0) {
             flush_paragraph();
-            code_block_t code;
+            Code_block code;
             code.language = trim(trimmed.substr(3));
             ++i;
             while (i < lines.size()) {
@@ -403,17 +400,17 @@ std::vector<block_t> parse_markdown(const std::string& input)
             continue;
         }
 
-        const classified_line_t cl = classify_line(lines[i]);
+        const Classified_line cl = classify_line(lines[i]);
 
         switch (cl.type) {
-            case classified_line_t::Type::EMPTY:
+            case Classified_line::Type::EMPTY:
                 flush_paragraph();
                 ++i;
                 break;
 
-            case classified_line_t::Type::HEADING: {
+            case Classified_line::Type::HEADING: {
                 flush_paragraph();
-                heading_block_t hb;
+                Heading_block hb;
                 hb.level = cl.heading_level;
                 hb.runs = parse_inline(cl.content);
                 blocks.push_back(std::move(hb));
@@ -421,11 +418,11 @@ std::vector<block_t> parse_markdown(const std::string& input)
                 break;
             }
 
-            case classified_line_t::Type::BULLET_ITEM:
-            case classified_line_t::Type::ORDERED_ITEM: {
+            case Classified_line::Type::BULLET_ITEM:
+            case Classified_line::Type::ORDERED_ITEM: {
                 flush_paragraph();
-                const bool ordered = cl.type == classified_line_t::Type::ORDERED_ITEM;
-                list_block_t lb;
+                const bool ordered = cl.type == Classified_line::Type::ORDERED_ITEM;
+                List_block lb;
                 lb.ordered = ordered;
                 lb.start_number = cl.list_number > 0 ? cl.list_number : 1;
 
@@ -435,7 +432,7 @@ std::vector<block_t> parse_markdown(const std::string& input)
                     if (!item_open) {
                         return;
                     }
-                    list_item_t item;
+                    List_item item;
                     item.runs = parse_inline(item_text);
                     lb.items.push_back(std::move(item));
                     item_text.clear();
@@ -443,10 +440,10 @@ std::vector<block_t> parse_markdown(const std::string& input)
                 };
 
                 while (i < lines.size()) {
-                    const classified_line_t item_line = classify_line(lines[i]);
+                    const Classified_line item_line = classify_line(lines[i]);
                     const bool matching =
-                        (ordered && item_line.type == classified_line_t::Type::ORDERED_ITEM)
-                        || (!ordered && item_line.type == classified_line_t::Type::BULLET_ITEM);
+                        (ordered && item_line.type == Classified_line::Type::ORDERED_ITEM)
+                        || (!ordered && item_line.type == Classified_line::Type::BULLET_ITEM);
                     if (matching) {
                         flush_item();
                         item_text = item_line.content;
@@ -455,7 +452,7 @@ std::vector<block_t> parse_markdown(const std::string& input)
                         continue;
                     }
 
-                    if (item_open && item_line.type == classified_line_t::Type::TEXT
+                    if (item_open && item_line.type == Classified_line::Type::TEXT
                         && !lines[i].empty()
                         && (lines[i][0] == ' ' || lines[i][0] == '\t'))
                     {
@@ -481,26 +478,26 @@ std::vector<block_t> parse_markdown(const std::string& input)
                 break;
             }
 
-            case classified_line_t::Type::TABLE_ROW: {
+            case Classified_line::Type::TABLE_ROW: {
                 if (i + 1 < lines.size()
-                    && classify_line(lines[i + 1]).type == classified_line_t::Type::TABLE_SEPARATOR) {
+                    && classify_line(lines[i + 1]).type == Classified_line::Type::TABLE_SEPARATOR) {
                     flush_paragraph();
-                    table_block_t table;
+                    Table_block table;
                     while (i < lines.size()) {
-                        const classified_line_t row_line = classify_line(lines[i]);
-                        if (row_line.type == classified_line_t::Type::TABLE_SEPARATOR) {
+                        const Classified_line row_line = classify_line(lines[i]);
+                        if (row_line.type == Classified_line::Type::TABLE_SEPARATOR) {
                             table.has_header = true;
                             ++i;
                             continue;
                         }
-                        if (row_line.type != classified_line_t::Type::TABLE_ROW) {
+                        if (row_line.type != Classified_line::Type::TABLE_ROW) {
                             break;
                         }
 
-                        table_row_t row;
+                        Table_row row;
                         const auto cells = split_table_cells(row_line.content);
                         for (const auto& cell_text : cells) {
-                            table_cell_t cell;
+                            Table_cell cell;
                             cell.runs = parse_inline(cell_text);
                             row.cells.push_back(std::move(cell));
                         }
@@ -519,7 +516,7 @@ std::vector<block_t> parse_markdown(const std::string& input)
                 break;
             }
 
-            case classified_line_t::Type::TABLE_SEPARATOR:
+            case Classified_line::Type::TABLE_SEPARATOR:
                 if (!paragraph_accum.empty()) {
                     paragraph_accum.push_back(' ');
                 }
@@ -527,13 +524,13 @@ std::vector<block_t> parse_markdown(const std::string& input)
                 ++i;
                 break;
 
-            case classified_line_t::Type::PAGE_BREAK:
+            case Classified_line::Type::PAGE_BREAK:
                 flush_paragraph();
-                blocks.push_back(page_break_block_t{});
+                blocks.push_back(Page_break_block{});
                 ++i;
                 break;
 
-            case classified_line_t::Type::TEXT:
+            case Classified_line::Type::TEXT:
             default:
                 if (!paragraph_accum.empty()) {
                     paragraph_accum.push_back(' ');

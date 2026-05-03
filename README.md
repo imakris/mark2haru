@@ -117,7 +117,7 @@ The simplest library entry point is:
 bool render_markdown_to_pdf(
     const std::string& markdown,
     const std::filesystem::path& output_path,
-    const render_options_t& options = {});
+    const Render_options& options = {});
 ```
 
 If you want the failure reason, use the overload with an output string:
@@ -129,7 +129,7 @@ if (!mark2haru::render_markdown_to_pdf(markdown, output_path, options, error)) {
 }
 ```
 
-`render_options_t` lets you control page geometry, body text sizing, line spacing, and the font
+`Render_options` lets you control page geometry, body text sizing, line spacing, and the font
 root directory used during font resolution.
 
 ## Example

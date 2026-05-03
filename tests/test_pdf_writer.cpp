@@ -92,7 +92,7 @@ int main(int argc, char* argv[])
     const fs::path out_path = exe_dir / "test_pdf_writer.pdf";
 
     auto metrics = std::make_shared<mark2haru::Measurement_context>(
-        mark2haru::font_family_config_t::briefutil_default(),
+        mark2haru::Font_family_config::briefutil_default(),
         exe_dir);
     if (!metrics->loaded()) {
         std::cerr << metrics->error() << "\n";

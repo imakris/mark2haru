@@ -69,19 +69,19 @@ public:
     double page_height_pt() const { return m_page_height_pt; }
 
 private:
-    struct page_t
+    struct Page
     {
         std::string content;
         std::vector<std::size_t> image_indices;
     };
 
-    struct loaded_font_t
+    struct Loaded_font
     {
         std::unordered_map<std::uint16_t, std::uint32_t> gid_to_unicode;
         std::unordered_set<std::uint16_t> used_glyphs;
     };
 
-    struct loaded_image_t
+    struct Loaded_image
     {
         Png_image image;
         std::string resource_name;
@@ -89,23 +89,23 @@ private:
 
     double m_page_width_pt  = 0.0;
     double m_page_height_pt = 0.0;
-    std::vector<page_t> m_pages;
+    std::vector<Page> m_pages;
     std::shared_ptr<const Measurement_context> m_metrics;
-    std::array<loaded_font_t, 5> m_fonts{};
-    std::vector<loaded_image_t> m_images;
+    std::array<Loaded_font, 5> m_fonts{};
+    std::vector<Loaded_image> m_images;
     bool m_fonts_loaded = false;
     std::string m_font_error;
 
     std::string& current_content();
-    page_t& current_page();
+    Page& current_page();
     static void append_color(std::string& out, const color_t& color, bool stroke);
     static std::string font_resource_name(Pdf_font font);
     static std::string utf8_to_hex_cid_string(
         const True_type_font& font,
-        loaded_font_t& loaded,
+        Loaded_font& loaded,
         const std::string& text);
-    static std::string make_to_unicode_cmap(const loaded_font_t& font);
-    static std::vector<Pdf_font> used_fonts(const std::array<loaded_font_t, 5>& fonts);
+    static std::string make_to_unicode_cmap(const Loaded_font& font);
+    static std::vector<Pdf_font> used_fonts(const std::array<Loaded_font, 5>& fonts);
 };
 
 } // namespace mark2haru

@@ -143,8 +143,8 @@ bool expect_render_font_failure(const fs::path& temp_dir)
         out << "not a font";
     }
 
-    mark2haru::render_options_t options;
-    options.font_family.regular = mark2haru::font_source_t::from_path(bogus_font);
+    mark2haru::Render_options options;
+    options.font_family.regular = mark2haru::Font_source::from_path(bogus_font);
 
     std::string error;
     if (mark2haru::render_markdown_to_pdf(
@@ -195,7 +195,7 @@ bool expect_render_locale_independent(const fs::path& temp_dir, const fs::path& 
         return true;
     }
 
-    mark2haru::render_options_t options;
+    mark2haru::Render_options options;
     options.font_root_dir = font_root_dir;
 
     const fs::path out_path = temp_dir / "locale_test.pdf";
@@ -252,7 +252,7 @@ bool expect_render_locale_independent(const fs::path& temp_dir, const fs::path& 
 
 bool expect_render_save_failure(const fs::path& temp_dir, const fs::path& font_root_dir)
 {
-    mark2haru::render_options_t options;
+    mark2haru::Render_options options;
     options.font_root_dir = font_root_dir;
 
     const fs::path missing_parent = temp_dir / "missing_parent";

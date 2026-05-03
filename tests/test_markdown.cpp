@@ -7,26 +7,26 @@
 namespace {
 
 using mark2haru::Inline_style;
-using mark2haru::block_t;
-using mark2haru::code_block_t;
-using mark2haru::heading_block_t;
-using mark2haru::inline_run_t;
-using mark2haru::list_block_t;
-using mark2haru::page_break_block_t;
-using mark2haru::paragraph_block_t;
+using mark2haru::Block;
+using mark2haru::Code_block;
+using mark2haru::Heading_block;
+using mark2haru::Inline_run;
+using mark2haru::List_block;
+using mark2haru::Page_break_block;
+using mark2haru::Paragraph_block;
 using mark2haru::parse_markdown;
-using mark2haru::table_block_t;
+using mark2haru::Table_block;
 
-const paragraph_block_t* expect_single_paragraph(const std::vector<block_t>& blocks)
+const Paragraph_block* expect_single_paragraph(const std::vector<Block>& blocks)
 {
     if (blocks.size() != 1) {
         std::fprintf(stderr, "expected 1 block, got %zu\n", blocks.size());
         return nullptr;
     }
-    return std::get_if<paragraph_block_t>(&blocks[0]);
+    return std::get_if<Paragraph_block>(&blocks[0]);
 }
 
-std::string flatten_runs(const std::vector<inline_run_t>& runs)
+std::string flatten_runs(const std::vector<Inline_run>& runs)
 {
     std::string out;
     for (const auto& run : runs) {
@@ -35,7 +35,7 @@ std::string flatten_runs(const std::vector<inline_run_t>& runs)
     return out;
 }
 
-bool expect_text_equals(const std::vector<inline_run_t>& runs, const std::string& expected)
+bool expect_text_equals(const std::vector<Inline_run>& runs, const std::string& expected)
 {
     const std::string actual = flatten_runs(runs);
     if (actual != expected) {
@@ -116,7 +116,7 @@ int main()
                 blocks.size());
             return 11;
         }
-        const auto* heading = std::get_if<heading_block_t>(&blocks[0]);
+        const auto* heading = std::get_if<Heading_block>(&blocks[0]);
         if (!heading) {
             std::fprintf(stderr, "expected heading block for trailing-newline case\n");
             return 12;
@@ -136,7 +136,7 @@ int main()
             std::fprintf(stderr, "expected 1 list block, got %zu\n", blocks.size());
             return 14;
         }
-        const auto* list = std::get_if<list_block_t>(&blocks[0]);
+        const auto* list = std::get_if<List_block>(&blocks[0]);
         if (!list || list->ordered || list->items.size() != 2) {
             std::fprintf(stderr, "unexpected list shape\n");
             return 15;
@@ -159,7 +159,7 @@ int main()
             std::fprintf(stderr, "expected 1 ordered list block, got %zu\n", blocks.size());
             return 18;
         }
-        const auto* list = std::get_if<list_block_t>(&blocks[0]);
+        const auto* list = std::get_if<List_block>(&blocks[0]);
         if (!list || !list->ordered || list->start_number != 3 || list->items.size() != 2) {
             std::fprintf(stderr, "unexpected ordered list shape\n");
             return 19;
@@ -181,7 +181,7 @@ int main()
             std::fprintf(stderr, "expected 1 code block, got %zu\n", blocks.size());
             return 21;
         }
-        const auto* code = std::get_if<code_block_t>(&blocks[0]);
+        const auto* code = std::get_if<Code_block>(&blocks[0]);
         if (!code) {
             std::fprintf(stderr, "expected code block\n");
             return 22;
@@ -208,7 +208,7 @@ int main()
             std::fprintf(stderr, "expected 1 table block, got %zu\n", blocks.size());
             return 25;
         }
-        const auto* table = std::get_if<table_block_t>(&blocks[0]);
+        const auto* table = std::get_if<Table_block>(&blocks[0]);
         if (!table || !table->has_header || table->rows.size() != 3) {
             std::fprintf(stderr, "unexpected table shape\n");
             return 26;
@@ -239,9 +239,9 @@ int main()
             std::fprintf(stderr, "expected 3 blocks for page-break case, got %zu\n", blocks.size());
             return 29;
         }
-        if (!std::get_if<paragraph_block_t >(&blocks[0]) ||
-            !std::get_if<page_break_block_t>(&blocks[1]) ||
-            !std::get_if<paragraph_block_t >(&blocks[2]))
+        if (!std::get_if<Paragraph_block >(&blocks[0]) ||
+            !std::get_if<Page_break_block>(&blocks[1]) ||
+            !std::get_if<Paragraph_block >(&blocks[2]))
         {
             std::fprintf(stderr, "unexpected block shape around page break\n");
             return 30;

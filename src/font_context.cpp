@@ -113,19 +113,19 @@ std::vector<fs::path> search_roots(const fs::path& font_root)
 
 } // namespace
 
-font_family_config_t font_family_config_t::briefutil_default()
+Font_family_config Font_family_config::briefutil_default()
 {
     return {};
 }
 
-font_source_t Measurement_context::slot_source(const font_family_config_t& family, Pdf_font font)
+Font_source Measurement_context::slot_source(const Font_family_config& family, Pdf_font font)
 {
-    const font_source_t* slots[] = {
+    const Font_source* slots[] = {
         &family.regular, &family.bold, &family.italic, &family.bold_italic, &family.mono,
     };
-    const font_source_t& configured = *slots[static_cast<std::size_t>(font)];
+    const Font_source& configured = *slots[static_cast<std::size_t>(font)];
     return configured.empty()
-        ? font_source_t::from_base14(slot_descriptor(font).base14)
+        ? Font_source::from_base14(slot_descriptor(font).base14)
         : configured;
 }
 
@@ -140,7 +140,7 @@ std::string Measurement_context::slot_tag_name(Pdf_font font)
 }
 
 fs::path Measurement_context::resolve_font_path(
-    const font_source_t& source,
+    const Font_source& source,
     const fs::path& font_root,
     Pdf_font font)
 {
@@ -176,12 +176,12 @@ fs::path Measurement_context::resolve_font_path(
 }
 
 Measurement_context::Measurement_context(
-    const font_family_config_t& family,
+    const Font_family_config& family,
     const fs::path& font_root)
 {
     for (std::size_t i = 0; i < m_slots.size(); ++i) {
         const Pdf_font font = static_cast<Pdf_font>(i);
-        const font_source_t source = slot_source(family, font);
+        const Font_source source = slot_source(family, font);
         const auto path = resolve_font_path(source, font_root, font);
         if (path.empty()) {
             m_error = "Unable to resolve font for " + default_base14_name(font);

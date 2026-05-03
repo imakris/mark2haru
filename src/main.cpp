@@ -38,7 +38,7 @@ int run(
         return 2;
     }
 
-    mark2haru::render_options_t options;
+    mark2haru::Render_options options;
     options.font_root_dir = exe_path.parent_path();
 
     std::string error;

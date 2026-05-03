@@ -29,20 +29,22 @@ Pdf_font font_for(Inline_style style)
     }
 }
 
-struct token_t {
+struct Token
+{
     std::string text;
     Inline_style style = Inline_style::NORMAL;
     bool newline = false;
 };
 
-struct line_t {
+struct Line
+{
     std::vector<std::pair<std::string, Inline_style>> spans;
     double height_pt = 0.0;
 };
 
-std::vector<token_t> tokenize_runs(const std::vector<inline_run_t>& runs)
+std::vector<Token> tokenize_runs(const std::vector<Inline_run>& runs)
 {
-    std::vector<token_t> tokens;
+    std::vector<Token> tokens;
     for (const auto& run : runs) {
         size_t start = 0;
         while (start <= run.text.size()) {
@@ -78,21 +80,21 @@ std::vector<token_t> tokenize_runs(const std::vector<inline_run_t>& runs)
 }
 
 template <class MeasureFn>
-std::vector<line_t> wrap_tokens(
-    const std::vector<token_t>& tokens,
+std::vector<Line> wrap_tokens(
+    const std::vector<Token>& tokens,
     double max_width_pt,
     double size_pt,
     double leading,
     MeasureFn&& measure)
 {
-    std::vector<line_t> lines;
-    line_t current;
+    std::vector<Line> lines;
+    Line current;
     double current_width = 0.0;
 
     auto finish_line = [&]() {
         current.height_pt = size_pt * leading;
         lines.push_back(current);
-        current = line_t{};
+        current = Line{};
         current_width = 0.0;
     };
 
@@ -161,8 +163,8 @@ std::vector<line_t> wrap_tokens(
 }
 
 template <class MeasureFn>
-std::vector<line_t> wrap_runs(
-    const std::vector<inline_run_t>& runs,
+std::vector<Line> wrap_runs(
+    const std::vector<Inline_run>& runs,
     double max_width_pt,
     double size_pt,
     double leading,
@@ -171,7 +173,7 @@ std::vector<line_t> wrap_runs(
     return wrap_tokens(tokenize_runs(runs), max_width_pt, size_pt, leading, measure);
 }
 
-double total_height(const std::vector<line_t>& lines)
+double total_height(const std::vector<Line>& lines)
 {
     double h = 0.0;
     for (const auto& line : lines) {
@@ -191,13 +193,14 @@ struct Overloaded : Ts...
 };
 template <class... Ts> Overloaded(Ts...) -> Overloaded<Ts...>;
 
-struct heading_metrics_t {
+struct heading_metrics_t
+{
     double size_factor;
     double space_before_factor;
     double space_after_factor;
 };
 
-constexpr heading_metrics_t heading_metrics_table[] = {
+constexpr heading_metrics_t k_heading_metrics_table[] = {
     { 1.00, 0.45, 0.35 }, // index 0 unused: level 0 / level >=7 fallback
     { 1.65, 0.95, 0.65 }, // h1
     { 1.35, 0.75, 0.55 }, // h2
@@ -210,12 +213,12 @@ constexpr heading_metrics_t heading_metrics_table[] = {
 const heading_metrics_t& heading_metrics(int level)
 {
     if (level < 1 || level > 6) {
-        return heading_metrics_table[0];
+        return k_heading_metrics_table[0];
     }
-    return heading_metrics_table[level];
+    return k_heading_metrics_table[level];
 }
 
-std::string list_marker(const list_block_t& lb, size_t index)
+std::string list_marker(const List_block& lb, size_t index)
 {
     if (!lb.ordered) {
         // U+2022 BULLET
@@ -230,16 +233,16 @@ std::string list_marker(const list_block_t& lb, size_t index)
 }
 
 template <class MeasureFn>
-std::vector<line_t> code_lines(
+std::vector<Line> code_lines(
     const std::string& text,
     double max_width_pt,
     double size_pt,
     double leading,
     MeasureFn&& measure)
 {
-    std::vector<line_t> lines;
+    std::vector<Line> lines;
     for (const auto& raw : split_lines(text)) {
-        std::vector<token_t> tokens;
+        std::vector<Token> tokens;
         tokens.push_back({ raw, Inline_style::CODE, false });
         auto wrapped = wrap_tokens(tokens, max_width_pt, size_pt, leading, measure);
         lines.insert(lines.end(), wrapped.begin(), wrapped.end());
@@ -255,7 +258,7 @@ std::vector<line_t> code_lines(
 bool render_markdown_to_pdf(
     const std::string& markdown,
     const fs::path& output_path,
-    const render_options_t& options,
+    const Render_options& options,
     std::string& error)
 {
     const auto blocks = parse_markdown(markdown);
@@ -304,7 +307,7 @@ bool render_markdown_to_pdf(
     // store the result back; code/table pass a local box-relative y in
     // and ignore the return.
     auto draw_lines_at = [&](
-        const std::vector<line_t>& lines,
+        const std::vector<Line>& lines,
         double size, double x, double y) -> double
     {
         for (const auto& line : lines) {
@@ -319,7 +322,7 @@ bool render_markdown_to_pdf(
         return y;
     };
 
-    auto on_paragraph = [&](const paragraph_block_t& pb) {
+    auto on_paragraph = [&](const Paragraph_block& pb) {
         const auto lines = wrap_runs(pb.runs, content_width, options.body_size_pt,
                                      options.line_spacing, measure);
         ensure_space(total_height(lines) + options.body_size_pt * 0.25);
@@ -327,7 +330,7 @@ bool render_markdown_to_pdf(
         cursor_y += options.body_size_pt * 0.35;
     };
 
-    auto on_heading = [&](const heading_block_t& hb) {
+    auto on_heading = [&](const Heading_block& hb) {
         const auto& hm = heading_metrics(hb.level);
         const double size = options.body_size_pt * hm.size_factor;
         const double space_before = size * hm.space_before_factor;
@@ -339,7 +342,7 @@ bool render_markdown_to_pdf(
         cursor_y += space_after;
     };
 
-    auto on_list = [&](const list_block_t& lb) {
+    auto on_list = [&](const List_block& lb) {
         const double gap = options.body_size_pt * 0.55;
         for (size_t i = 0; i < lb.items.size(); ++i) {
             const std::string marker = list_marker(lb, i);
@@ -358,7 +361,7 @@ bool render_markdown_to_pdf(
         cursor_y += options.body_size_pt * 0.15;
     };
 
-    auto on_code = [&](const code_block_t& cb) {
+    auto on_code = [&](const Code_block& cb) {
         const double size = options.body_size_pt * 0.92;
         const double pad = options.body_size_pt * 0.45;
         const double available_width = content_width - pad * 2.0;
@@ -373,7 +376,7 @@ bool render_markdown_to_pdf(
         cursor_y += height + options.body_size_pt * 0.25;
     };
 
-    auto on_table = [&](const table_block_t& tb) {
+    auto on_table = [&](const Table_block& tb) {
         if (tb.rows.empty()) {
             return;
         }
@@ -390,14 +393,14 @@ bool render_markdown_to_pdf(
         const double cell_size = options.body_size_pt * 0.95;
         const double col_width = content_width / static_cast<double>(column_count);
         const double inner_width = col_width - cell_pad * 2.0;
-        std::vector<std::vector<std::vector<line_t>>> cell_lines(tb.rows.size());
+        std::vector<std::vector<std::vector<Line>>> cell_lines(tb.rows.size());
         std::vector<double> row_heights(tb.rows.size(), 0.0);
         for (size_t r = 0; r < tb.rows.size(); ++r) {
             cell_lines[r].resize(column_count);
             const auto& row = tb.rows[r];
             double row_height = 0.0;
             for (size_t col = 0; col < column_count; ++col) {
-                const std::vector<inline_run_t> empty;
+                const std::vector<Inline_run> empty;
                 const auto& runs = col < row.cells.size() ? row.cells[col].runs : empty;
                 cell_lines[r][col] = wrap_runs(runs, inner_width, cell_size, 1.22, measure);
                 const double cell_height = total_height(cell_lines[r][col]) + cell_pad * 2.0;
@@ -462,7 +465,7 @@ bool render_markdown_to_pdf(
         cursor_y += options.body_size_pt * 0.25;
     };
 
-    auto on_page_break = [&](const page_break_block_t&) {
+    auto on_page_break = [&](const Page_break_block&) {
         new_page();
     };
 
@@ -489,7 +492,7 @@ bool render_markdown_to_pdf(
 bool render_markdown_to_pdf(
     const std::string& markdown,
     const fs::path& output_path,
-    const render_options_t& options)
+    const Render_options& options)
 {
     std::string scratch;
     return render_markdown_to_pdf(markdown, output_path, options, scratch);

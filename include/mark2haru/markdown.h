@@ -16,69 +16,69 @@ enum class Inline_style
     CODE,
 };
 
-struct inline_run_t
+struct Inline_run
 {
     std::string text;
     Inline_style style = Inline_style::NORMAL;
 };
 
-struct paragraph_block_t
+struct Paragraph_block
 {
-    std::vector<inline_run_t> runs;
+    std::vector<Inline_run> runs;
 };
 
-struct heading_block_t
+struct Heading_block
 {
     int level = 1;
-    std::vector<inline_run_t> runs;
+    std::vector<Inline_run> runs;
 };
 
-struct list_item_t
+struct List_item
 {
-    std::vector<inline_run_t> runs;
+    std::vector<Inline_run> runs;
 };
 
-struct list_block_t
+struct List_block
 {
     bool ordered     = false;
     int start_number = 1;
-    std::vector<list_item_t> items;
+    std::vector<List_item> items;
 };
 
-struct code_block_t
+struct Code_block
 {
     std::string language;
     std::string text;
 };
 
-struct table_cell_t
+struct Table_cell
 {
-    std::vector<inline_run_t> runs;
+    std::vector<Inline_run> runs;
 };
 
-struct table_row_t
+struct Table_row
 {
-    std::vector<table_cell_t> cells;
+    std::vector<Table_cell> cells;
 };
 
-struct table_block_t
+struct Table_block
 {
-    std::vector<table_row_t> rows;
+    std::vector<Table_row> rows;
     bool has_header = false;
 };
 
-struct page_break_block_t
+struct Page_break_block
 {
 };
 
-using block_t = std::variant<
-    paragraph_block_t,
-    heading_block_t,
-    list_block_t,
-    code_block_t,
-    table_block_t,
-    page_break_block_t>;
+using Block = std::variant<
+    Paragraph_block,
+    Heading_block,
+    List_block,
+    Code_block,
+    Table_block,
+    Page_break_block>;
 
-std::vector<block_t> parse_markdown(const std::string& input);
+std::vector<Block> parse_markdown(const std::string& input);
 
 } // namespace mark2haru

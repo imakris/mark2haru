@@ -19,21 +19,21 @@ enum class Pdf_font
     MONO,
 };
 
-struct font_source_t
+struct Font_source
 {
     std::filesystem::path path;
     std::string base14_name;
 
-    static font_source_t from_path(const std::filesystem::path& path)
+    static Font_source from_path(const std::filesystem::path& path)
     {
-        font_source_t out;
+        Font_source out;
         out.path = path;
         return out;
     }
 
-    static font_source_t from_base14(const std::string& name)
+    static Font_source from_base14(const std::string& name)
     {
-        font_source_t out;
+        Font_source out;
         out.base14_name = name;
         return out;
     }
@@ -44,22 +44,22 @@ struct font_source_t
     }
 };
 
-struct font_family_config_t
+struct Font_family_config
 {
-    font_source_t regular;
-    font_source_t bold;
-    font_source_t italic;
-    font_source_t bold_italic;
-    font_source_t mono;
+    Font_source regular;
+    Font_source bold;
+    Font_source italic;
+    Font_source bold_italic;
+    Font_source mono;
 
-    static font_family_config_t briefutil_default();
+    static Font_family_config briefutil_default();
 };
 
 class Measurement_context
 {
 public:
     Measurement_context(
-        const font_family_config_t& family = font_family_config_t::briefutil_default(),
+        const Font_family_config& family = Font_family_config::briefutil_default(),
         const std::filesystem::path& font_root = {});
 
     bool loaded()              const { return m_loaded; }
@@ -70,21 +70,21 @@ public:
     const std::string& font_tag_name(Pdf_font font) const;
 
 private:
-    struct slot_t
+    struct Slot
     {
         True_type_font face;
         std::string tag_name;
     };
 
-    std::array<slot_t, 5> m_slots{};
+    std::array<Slot, 5> m_slots{};
     std::string m_error;
     bool m_loaded = false;
 
-    static font_source_t slot_source(const font_family_config_t& family, Pdf_font font);
+    static Font_source slot_source(const Font_family_config& family, Pdf_font font);
     static std::string default_base14_name(Pdf_font font);
     static std::string slot_tag_name(Pdf_font font);
     static std::filesystem::path resolve_font_path(
-        const font_source_t& source,
+        const Font_source& source,
         const std::filesystem::path& font_root,
         Pdf_font font);
 };
