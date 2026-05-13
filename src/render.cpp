@@ -506,6 +506,23 @@ bool render_markdown_to_pdf(
         new_page();
     };
 
+    auto on_thematic_break = [&](const Thematic_break_block&) {
+        constexpr color_t rule_color = { 0.5, 0.5, 0.5 };
+        constexpr double rule_width_pt = 0.5;
+        const double space_before = options.body_size_pt * 0.5;
+        const double space_after  = options.body_size_pt * 0.5;
+        ensure_space(space_before + rule_width_pt + space_after);
+        cursor_y += space_before;
+        writer.stroke_line(
+            options.margin_left_pt,
+            cursor_y,
+            options.margin_left_pt + content_width,
+            cursor_y,
+            rule_color,
+            rule_width_pt);
+        cursor_y += rule_width_pt + space_after;
+    };
+
     for (const auto& block : blocks) {
         std::visit(
             Overloaded{
@@ -516,6 +533,7 @@ bool render_markdown_to_pdf(
                 on_code,
                 on_table,
                 on_page_break,
+                on_thematic_break,
             },
             block);
     }

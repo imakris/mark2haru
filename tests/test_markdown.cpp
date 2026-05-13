@@ -18,6 +18,7 @@ using mark2haru::Page_break_block;
 using mark2haru::Paragraph_block;
 using mark2haru::parse_markdown;
 using mark2haru::Table_block;
+using mark2haru::Thematic_break_block;
 
 const Paragraph_block* expect_single_paragraph(const std::vector<Block>& blocks)
 {
@@ -276,6 +277,59 @@ int main()
         {
             std::fprintf(stderr, "unexpected block shape around page break\n");
             return 35;
+        }
+    }
+
+    {
+        // Each of the three thematic-break forms parses as a Thematic_break_block.
+        for (const char* form : { "---", "***", "___" }) {
+            const auto blocks = parse_markdown(form);
+            if (blocks.size() != 1 || !std::get_if<Thematic_break_block>(&blocks[0])) {
+                std::fprintf(stderr, "expected thematic break for '%s'\n", form);
+                return 36;
+            }
+        }
+    }
+
+    {
+        // Spaced forms `- - -` and `* * *` are also thematic breaks, and
+        // must win over the bullet-item classification.
+        for (const char* form : { "- - -", "* * *", "_ _ _ _" }) {
+            const auto blocks = parse_markdown(form);
+            if (blocks.size() != 1 || !std::get_if<Thematic_break_block>(&blocks[0])) {
+                std::fprintf(stderr, "expected thematic break for '%s'\n", form);
+                return 37;
+            }
+        }
+    }
+
+    {
+        // Fewer than three markers, mixed markers, or markers with other
+        // content are not thematic breaks.
+        for (const char* form : { "--", "-*-", "___emphasis___", "- item" }) {
+            const auto blocks = parse_markdown(form);
+            if (blocks.empty() || std::get_if<Thematic_break_block>(&blocks[0])) {
+                std::fprintf(stderr, "did not expect thematic break for '%s'\n", form);
+                return 38;
+            }
+        }
+    }
+
+    {
+        // A thematic break between two paragraphs flushes the first.
+        const auto blocks = parse_markdown(
+            "before\n"
+            "\n"
+            "---\n"
+            "\n"
+            "after\n");
+        if (blocks.size() != 3
+            || !std::get_if<Paragraph_block     >(&blocks[0])
+            || !std::get_if<Thematic_break_block>(&blocks[1])
+            || !std::get_if<Paragraph_block     >(&blocks[2]))
+        {
+            std::fprintf(stderr, "unexpected block shape around thematic break\n");
+            return 39;
         }
     }
 

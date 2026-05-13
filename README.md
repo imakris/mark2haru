@@ -20,6 +20,7 @@ compression.
 - simple pipe tables that split across pages (headers repeat)
 - inline `**bold**`, `*italic*`, `***bold italic***`, and `` `code` ``
 - links rendered as `text (url)` so the destination is not lost
+- thematic breaks (`---`, `***`, `___`, also spaced forms like `- - -`)
 - explicit page breaks via `<!-- pagebreak -->`
 
 ## What it does not try to do

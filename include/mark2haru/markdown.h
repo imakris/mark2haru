@@ -77,6 +77,10 @@ struct Page_break_block
 {
 };
 
+struct Thematic_break_block
+{
+};
+
 using Block = std::variant<
     Paragraph_block,
     Heading_block,
@@ -84,7 +88,8 @@ using Block = std::variant<
     Image_content_block,
     Code_block,
     Table_block,
-    Page_break_block>;
+    Page_break_block,
+    Thematic_break_block>;
 
 std::vector<Block> parse_markdown(const std::string& input);
 

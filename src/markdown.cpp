@@ -16,6 +16,32 @@ bool is_word_char(char c)
     return std::isalnum(static_cast<unsigned char>(c)) != 0;
 }
 
+// CommonMark thematic break: three or more matching `-`, `_`, or `*`
+// characters, optionally separated by spaces/tabs, with no other content.
+// The caller has already trimmed leading and trailing whitespace.
+bool is_thematic_break(std::string_view trimmed)
+{
+    char marker = 0;
+    int count = 0;
+    for (char c : trimmed) {
+        if (c == ' ' || c == '\t') {
+            continue;
+        }
+        if (c != '-' && c != '_' && c != '*') {
+            return false;
+        }
+        if (marker == 0) {
+            marker = c;
+        }
+        else
+        if (c != marker) {
+            return false;
+        }
+        ++count;
+    }
+    return count >= 3;
+}
+
 std::string trim(const std::string& s)
 {
     const auto begin = s.find_first_not_of(" \t\r");
@@ -257,6 +283,7 @@ struct Classified_line
         TABLE_ROW,
         TABLE_SEPARATOR,
         PAGE_BREAK,
+        THEMATIC_BREAK,
         TEXT,
     } type = Type::TEXT;
     std::string content;
@@ -287,6 +314,12 @@ Classified_line classify_line(const std::string& line)
         if (level > 0 && level < static_cast<int>(trimmed.size()) && trimmed[level] == ' ') {
             return { Classified_line::Type::HEADING, trim(trimmed.substr(level + 1)), level, 0 };
         }
+    }
+
+    // Thematic break must win over the bullet check, otherwise `- - -`
+    // would be eaten as a bullet item starting with `-` and a space.
+    if (is_thematic_break(trimmed)) {
+        return { Classified_line::Type::THEMATIC_BREAK, {}, 0, 0 };
     }
 
     if (trimmed.size() >= 2
@@ -556,6 +589,12 @@ std::vector<Block> parse_markdown(const std::string& input)
             case Classified_line::Type::PAGE_BREAK:
                 flush_paragraph();
                 blocks.push_back(Page_break_block{});
+                ++i;
+                break;
+
+            case Classified_line::Type::THEMATIC_BREAK:
+                flush_paragraph();
+                blocks.push_back(Thematic_break_block{});
                 ++i;
                 break;
 
