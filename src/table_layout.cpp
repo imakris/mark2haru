@@ -317,6 +317,67 @@ double min_content_width_for_line_count(
     return hi;
 }
 
+// Water-fill the room above min_widths. Every column gets at least its
+// min_width. The remaining budget is then distributed so each column fills
+// its own room (pref - min) up to a common water level L; columns with less
+// room than L fill completely, columns with more room than L stop at L.
+//
+// This replaces the proportional shrink, which scaled each column's
+// reduction by its room. A column with little room (e.g. 5 pt between min
+// and pref) still lost a slice large enough to dip below the no-wrap pref,
+// causing avoidable wraps in narrow columns while fat columns kept most of
+// their slack.
+std::vector<double> waterfill_widths(
+    const std::vector<double>& min_widths,
+    const std::vector<double>& pref_widths,
+    double available_width_pt)
+{
+    const size_t n = min_widths.size();
+    std::vector<double> rooms(n, 0.0);
+    double sum_min = 0.0;
+    double sum_rooms = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+        rooms[i] = std::max(0.0, pref_widths[i] - min_widths[i]);
+        sum_min += min_widths[i];
+        sum_rooms += rooms[i];
+    }
+    const double budget = available_width_pt - sum_min;
+    if (budget >= sum_rooms) {
+        return pref_widths;
+    }
+    if (budget <= 0.0) {
+        return min_widths;
+    }
+
+    double lo = 0.0;
+    double hi = 0.0;
+    for (double r : rooms) {
+        if (r > hi) {
+            hi = r;
+        }
+    }
+    for (int step = 0; step < 50; ++step) {
+        const double level = 0.5 * (lo + hi);
+        double served = 0.0;
+        for (double r : rooms) {
+            served += std::min(r, level);
+        }
+        if (served < budget) {
+            lo = level;
+        }
+        else {
+            hi = level;
+        }
+    }
+    const double level = lo;
+
+    std::vector<double> result(n, 0.0);
+    for (size_t i = 0; i < n; ++i) {
+        result[i] = min_widths[i] + std::min(rooms[i], level);
+    }
+    return result;
+}
+
 bool candidate_is_better(
     const Table_columns& candidate,
     double candidate_height,
@@ -335,9 +396,69 @@ bool candidate_is_better(
     return width_sum(candidate.widths_pt) + k_width_epsilon_pt < width_sum(best.widths_pt);
 }
 
+// Shrink each column to the smallest width that keeps its per-row line counts
+// unchanged. The freed width becomes slack that the surrounding optimizer can
+// give to columns that wrap, without ever increasing any column's wrap count.
+//
+// Without this pass `optimize_columns` cannot move width between columns: it
+// only ever consumes slack, so an initial allocation that over-feeds a wide
+// column while squeezing narrow ones below their no-wrap width is permanent.
+void tighten_columns(
+    const Table_block& table,
+    Table_columns& columns,
+    const std::vector<double>& min_widths,
+    const table_style_t& style,
+    const Measurement_context& metrics)
+{
+    const int header_rows = table.has_header ? 1 : 0;
+    const double pad = 2.0 * style.cell_padding_pt;
+
+    for (int col = 0; col < columns.column_count; ++col) {
+        const double current_content_width = columns.widths_pt[col] - pad;
+        if (current_content_width <= 0.0) {
+            continue;
+        }
+        const double lower_bound_content = std::max(0.0, min_widths[col] - pad);
+
+        double needed_content_width = lower_bound_content;
+        for (int row_index = 0; row_index < static_cast<int>(table.rows.size()); ++row_index) {
+            const auto runs = table_cell_runs(
+                table.rows[row_index], col, row_index < header_rows);
+            const int current_lines = cell_line_count(
+                runs, current_content_width, style, metrics);
+            if (current_lines <= 0) {
+                continue;
+            }
+            if (cell_line_count(runs, lower_bound_content, style, metrics) <= current_lines) {
+                continue;
+            }
+            double lo = lower_bound_content;
+            double hi = current_content_width;
+            for (int step = 0; step < 18; ++step) {
+                const double mid = (lo + hi) * 0.5;
+                if (cell_line_count(runs, mid, style, metrics) <= current_lines) {
+                    hi = mid;
+                }
+                else {
+                    lo = mid;
+                }
+            }
+            if (hi > needed_content_width) {
+                needed_content_width = hi;
+            }
+        }
+
+        const double new_width = needed_content_width + pad;
+        if (new_width + 0.001 < columns.widths_pt[col]) {
+            columns.widths_pt[col] = new_width;
+        }
+    }
+}
+
 Table_columns optimize_columns(
     const Table_block& table,
     Table_columns columns,
+    const std::vector<double>& min_widths,
     double available_width_pt,
     const table_style_t& style,
     const Measurement_context& metrics)
@@ -346,6 +467,8 @@ Table_columns optimize_columns(
     static constexpr double k_width_epsilon_pt = 0.03;
 
     for (int iteration = 0; iteration < 64; ++iteration) {
+        tighten_columns(table, columns, min_widths, style, metrics);
+
         const double current_height = table_total_height(table, columns, style, metrics);
         const double slack = available_width_pt - width_sum(columns.widths_pt);
         if (slack <= k_width_epsilon_pt) {
@@ -500,23 +623,10 @@ Table_columns compute_table_columns(
     }
 
     columns.valid = true;
-    const double total_pref = width_sum(pref_widths);
-    if (total_pref <= available_width_pt) {
-        columns.widths_pt = pref_widths;
-    }
-    else {
-        const double total_min = width_sum(min_widths);
-        const double shrinkable = total_pref - total_min;
-        const double excess = total_pref - available_width_pt;
-        columns.widths_pt.resize(columns.column_count);
-        for (int col = 0; col < columns.column_count; ++col) {
-            const double room = pref_widths[col] - min_widths[col];
-            const double reduction = shrinkable > 0.0 ? excess * (room / shrinkable) : 0.0;
-            columns.widths_pt[col] = pref_widths[col] - reduction;
-        }
-    }
+    columns.widths_pt = waterfill_widths(min_widths, pref_widths, available_width_pt);
 
-    return optimize_columns(table, std::move(columns), available_width_pt, style, metrics);
+    return optimize_columns(
+        table, std::move(columns), min_widths, available_width_pt, style, metrics);
 }
 
 Table_row_layout layout_table_row(
