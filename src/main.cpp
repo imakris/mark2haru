@@ -28,9 +28,9 @@ bool read_file(const fs::path& path, std::string& out)
 }
 
 int run(
-    const fs::path& exe_path,
-    const fs::path& input_path,
-    const fs::path& output_path)
+    const fs::path&    exe_path,
+    const fs::path&    input_path,
+    const fs::path&    output_path)
 {
     std::string markdown;
     if (!read_file(input_path, markdown)) {

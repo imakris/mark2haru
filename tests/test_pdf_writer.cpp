@@ -55,7 +55,7 @@ std::string decoded_pdf_streams(const std::string& pdf)
         }
 
         const std::size_t payload_pos = stream_pos + 7;
-        const std::size_t end_pos = pdf.find("\nendstream", payload_pos);
+        const std::size_t end_pos     = pdf.find("\nendstream", payload_pos);
         if (end_pos == std::string::npos) {
             break;
         }

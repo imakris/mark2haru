@@ -29,7 +29,7 @@ inline std::vector<std::string> split_lines(std::string_view text)
     std::vector<std::string> lines;
     std::size_t pos = 0;
     while (pos <= text.size()) {
-        const std::size_t nl = text.find('\n', pos);
+        const std::size_t nl  = text.find('\n', pos);
         const std::size_t end = nl == std::string_view::npos ? text.size() : nl;
         std::string line(text.substr(pos, end - pos));
         if (!line.empty() && line.back() == '\r') {

@@ -23,21 +23,22 @@ Pdf_font font_for(Inline_style style)
 
 struct Token
 {
-    std::string text;
-    Inline_style style = Inline_style::NORMAL;
-    bool newline = false;
+    std::string    text;
+    Inline_style   style     = Inline_style::NORMAL;
+    bool           newline   = false;
 };
 
 struct Line
 {
-    std::vector<std::pair<std::string, Inline_style>> spans;
-    double height_pt = 0.0;
+    std::vector<std::pair<std::string, Inline_style>>
+                   spans;
+    double         height_pt = 0.0;
 };
 
 std::vector<Inline_run> table_cell_runs(
-    const Table_row& row,
-    int col,
-    bool is_header)
+    const Table_row&   row,
+    int                col,
+    bool               is_header)
 {
     std::vector<Inline_run> runs;
     if (col < static_cast<int>(row.cells.size())) {
@@ -99,10 +100,10 @@ std::vector<Token> tokenize_runs(const std::vector<Inline_run>& runs)
 
 std::vector<Line> wrap_runs(
     const std::vector<Inline_run>& runs,
-    double max_width_pt,
-    double size_pt,
-    double leading_pt,
-    const Measurement_context& metrics)
+    double                         max_width_pt,
+    double                         size_pt,
+    double                         leading_pt,
+    const Measurement_context&     metrics)
 {
     std::vector<Line> lines;
     Line current;
@@ -127,8 +128,8 @@ std::vector<Line> wrap_runs(
     };
 
     auto add_word = [&](const std::string& word, Inline_style style) {
-        const Pdf_font font = font_for(style);
-        const double word_width = metrics.measure_text_width(font, word, size_pt);
+        const Pdf_font font       = font_for(style);
+        const double   word_width = metrics.measure_text_width(font, word, size_pt);
         if (current_width > 0.0 && current_width + word_width > max_width_pt) {
             finish_line();
         }
@@ -142,7 +143,7 @@ std::vector<Line> wrap_runs(
         double fragment_width = 0.0;
         for (const auto& piece : utf8::split_pieces(word)) {
             const double piece_width = metrics.measure_text_width(font, piece, size_pt);
-            const bool has_content = current_width > 0.0 || fragment_width > 0.0;
+            const bool   has_content = current_width > 0.0 || fragment_width > 0.0;
             if (has_content && current_width + fragment_width + piece_width > max_width_pt) {
                 if (!fragment.empty()) {
                     append_span(fragment, style);
@@ -201,8 +202,8 @@ double lines_height(const std::vector<Line>& lines)
 
 double cell_min_width(
     const std::vector<Inline_run>& runs,
-    double size_pt,
-    const Measurement_context& metrics)
+    double                         size_pt,
+    const Measurement_context&     metrics)
 {
     double max_word = 0.0;
     for (const auto& run : runs) {
@@ -220,8 +221,8 @@ double cell_min_width(
 
 double cell_preferred_width(
     const std::vector<Inline_run>& runs,
-    double size_pt,
-    const Measurement_context& metrics)
+    double                         size_pt,
+    const Measurement_context&     metrics)
 {
     double total = 0.0;
     for (const auto& run : runs) {
@@ -240,18 +241,18 @@ double width_sum(const std::vector<double>& widths_pt)
 }
 
 double table_row_height(
-    const Table_block& table,
-    int row_index,
-    const Table_columns& columns,
-    const table_style_t& style,
+    const Table_block&         table,
+    int                        row_index,
+    const Table_columns&       columns,
+    const table_style_t&       style,
     const Measurement_context& metrics)
 {
-    double row_height = style.text_leading_pt;
-    const int header_rows = table.has_header ? 1 : 0;
-    const auto& row = table.rows[row_index];
+    double      row_height  = style.text_leading_pt;
+    const int   header_rows = table.has_header ? 1 : 0;
+    const auto& row         = table.rows[row_index];
     for (int col = 0; col < columns.column_count; ++col) {
         const double content_width = columns.widths_pt[col] - 2.0 * style.cell_padding_pt;
-        const auto runs = table_cell_runs(row, col, row_index < header_rows);
+        const auto   runs          = table_cell_runs(row, col, row_index < header_rows);
         row_height = std::max(
             row_height,
             lines_height(wrap_runs(
@@ -265,10 +266,10 @@ double table_row_height(
 }
 
 double table_total_height(
-    const Table_block& table,
-    const Table_columns& columns,
-    const table_style_t& style,
-    const Measurement_context& metrics)
+    const Table_block&             table,
+    const Table_columns&           columns,
+    const table_style_t&           style,
+    const Measurement_context&     metrics)
 {
     double height = 0.0;
     for (int row = 0; row < static_cast<int>(table.rows.size()); ++row) {
@@ -279,25 +280,23 @@ double table_total_height(
 
 int cell_line_count(
     const std::vector<Inline_run>& runs,
-    double content_width_pt,
-    const table_style_t& style,
-    const Measurement_context& metrics)
+    double                         content_width_pt,
+    const table_style_t&           style,
+    const Measurement_context&     metrics)
 {
-    return static_cast<int>(wrap_runs(
-        runs,
-        content_width_pt,
-        style.text_size_pt,
-        style.text_leading_pt,
-        metrics).size());
+    return
+        static_cast<int>(
+            wrap_runs(runs, content_width_pt, style.text_size_pt, style.text_leading_pt, metrics).size()
+        );
 }
 
 double min_content_width_for_line_count(
     const std::vector<Inline_run>& runs,
-    double current_width_pt,
-    double max_width_pt,
-    int target_lines,
-    const table_style_t& style,
-    const Measurement_context& metrics)
+    double                         current_width_pt,
+    double                         max_width_pt,
+    int                            target_lines,
+    const table_style_t&           style,
+    const Measurement_context&     metrics)
 {
     if (cell_line_count(runs, max_width_pt, style, metrics) > target_lines) {
         return -1.0;
@@ -330,11 +329,11 @@ double min_content_width_for_line_count(
 std::vector<double> waterfill_widths(
     const std::vector<double>& min_widths,
     const std::vector<double>& pref_widths,
-    double available_width_pt)
+    double                     available_width_pt)
 {
     const size_t n = min_widths.size();
     std::vector<double> rooms(n, 0.0);
-    double sum_min = 0.0;
+    double sum_min   = 0.0;
     double sum_rooms = 0.0;
     for (size_t i = 0; i < n; ++i) {
         rooms[i] = std::max(0.0, pref_widths[i] - min_widths[i]);
@@ -342,12 +341,8 @@ std::vector<double> waterfill_widths(
         sum_rooms += rooms[i];
     }
     const double budget = available_width_pt - sum_min;
-    if (budget >= sum_rooms) {
-        return pref_widths;
-    }
-    if (budget <= 0.0) {
-        return min_widths;
-    }
+    if (budget >= sum_rooms) { return pref_widths; }
+    if (budget <= 0.0)       { return min_widths;  }
 
     double lo = 0.0;
     double hi = 0.0;
@@ -357,8 +352,8 @@ std::vector<double> waterfill_widths(
         }
     }
     for (int step = 0; step < 50; ++step) {
-        const double level = 0.5 * (lo + hi);
-        double served = 0.0;
+        const double level  = 0.5 * (lo + hi);
+        double       served = 0.0;
         for (double r : rooms) {
             served += std::min(r, level);
         }
@@ -379,20 +374,16 @@ std::vector<double> waterfill_widths(
 }
 
 bool candidate_is_better(
-    const Table_columns& candidate,
-    double candidate_height,
-    const Table_columns& best,
-    double best_height)
+    const Table_columns&   candidate,
+    double                 candidate_height,
+    const Table_columns&   best,
+    double                 best_height)
 {
     static constexpr double k_height_epsilon_pt = 0.03;
-    static constexpr double k_width_epsilon_pt = 0.03;
+    static constexpr double k_width_epsilon_pt  = 0.03;
 
-    if (candidate_height + k_height_epsilon_pt < best_height) {
-        return true;
-    }
-    if (candidate_height > best_height + k_height_epsilon_pt) {
-        return false;
-    }
+    if (candidate_height + k_height_epsilon_pt < best_height) { return true;  }
+    if (candidate_height > best_height + k_height_epsilon_pt) { return false; }
     return width_sum(candidate.widths_pt) + k_width_epsilon_pt < width_sum(best.widths_pt);
 }
 
@@ -404,14 +395,14 @@ bool candidate_is_better(
 // only ever consumes slack, so an initial allocation that over-feeds a wide
 // column while squeezing narrow ones below their no-wrap width is permanent.
 void tighten_columns(
-    const Table_block& table,
-    Table_columns& columns,
+    const Table_block&         table,
+    Table_columns&             columns,
     const std::vector<double>& min_widths,
-    const table_style_t& style,
+    const table_style_t&       style,
     const Measurement_context& metrics)
 {
-    const int header_rows = table.has_header ? 1 : 0;
-    const double pad = 2.0 * style.cell_padding_pt;
+    const int    header_rows = table.has_header ? 1 : 0;
+    const double pad         = 2.0 * style.cell_padding_pt;
 
     for (int col = 0; col < columns.column_count; ++col) {
         const double current_content_width = columns.widths_pt[col] - pad;
@@ -426,12 +417,8 @@ void tighten_columns(
                 table.rows[row_index], col, row_index < header_rows);
             const int current_lines = cell_line_count(
                 runs, current_content_width, style, metrics);
-            if (current_lines <= 0) {
-                continue;
-            }
-            if (cell_line_count(runs, lower_bound_content, style, metrics) <= current_lines) {
-                continue;
-            }
+            if (current_lines <= 0)                                                          { continue; }
+            if (cell_line_count(runs, lower_bound_content, style, metrics) <= current_lines) { continue; }
             double lo = lower_bound_content;
             double hi = current_content_width;
             for (int step = 0; step < 18; ++step) {
@@ -456,27 +443,27 @@ void tighten_columns(
 }
 
 Table_columns optimize_columns(
-    const Table_block& table,
-    Table_columns columns,
+    const Table_block&         table,
+    Table_columns              columns,
     const std::vector<double>& min_widths,
-    double available_width_pt,
-    const table_style_t& style,
+    double                     available_width_pt,
+    const table_style_t&       style,
     const Measurement_context& metrics)
 {
     static constexpr double k_height_epsilon_pt = 0.03;
-    static constexpr double k_width_epsilon_pt = 0.03;
+    static constexpr double k_width_epsilon_pt  = 0.03;
 
     for (int iteration = 0; iteration < 64; ++iteration) {
         tighten_columns(table, columns, min_widths, style, metrics);
 
         const double current_height = table_total_height(table, columns, style, metrics);
-        const double slack = available_width_pt - width_sum(columns.widths_pt);
+        const double slack          = available_width_pt - width_sum(columns.widths_pt);
         if (slack <= k_width_epsilon_pt) {
             break;
         }
 
-        Table_columns best = columns;
-        double best_height = current_height;
+        Table_columns best        = columns;
+        double        best_height = current_height;
 
         for (int col = 0; col < columns.column_count; ++col) {
             Table_columns full = columns;
@@ -490,7 +477,7 @@ Table_columns optimize_columns(
             double lo = 0.0;
             double hi = slack;
             for (int step = 0; step < 18; ++step) {
-                const double mid = (lo + hi) * 0.5;
+                const double  mid   = (lo + hi) * 0.5;
                 Table_columns probe = columns;
                 probe.widths_pt[col] += mid;
                 if (table_total_height(table, probe, style, metrics) + k_height_epsilon_pt
@@ -528,7 +515,7 @@ Table_columns optimize_columns(
 
             for (int target_lines = max_lines - 1; target_lines >= 1; --target_lines) {
                 Table_columns candidate = columns;
-                bool possible = true;
+                bool          possible  = true;
                 for (int col = 0; col < columns.column_count; ++col) {
                     if (line_counts[col] <= target_lines) {
                         continue;
@@ -583,9 +570,9 @@ Table_columns optimize_columns(
 } // namespace
 
 Table_columns compute_table_columns(
-    const Table_block& table,
-    double available_width_pt,
-    const table_style_t& style,
+    const Table_block&         table,
+    double                     available_width_pt,
+    const table_style_t&       style,
     const Measurement_context& metrics)
 {
     Table_columns columns;
@@ -600,8 +587,8 @@ Table_columns compute_table_columns(
         return columns;
     }
 
-    const int header_rows = table.has_header ? 1 : 0;
-    const double pad = 2.0 * style.cell_padding_pt;
+    const int    header_rows = table.has_header ? 1 : 0;
+    const double pad         = 2.0 * style.cell_padding_pt;
     std::vector<double> min_widths(columns.column_count, 0.0);
     std::vector<double> pref_widths(columns.column_count, 0.0);
 
@@ -630,12 +617,12 @@ Table_columns compute_table_columns(
 }
 
 Table_row_layout layout_table_row(
-    const Table_block& table,
-    int row_index,
-    const Table_columns& columns,
-    double left_pt,
-    double top_pt,
-    const table_style_t& style,
+    const Table_block&         table,
+    int                        row_index,
+    const Table_columns&       columns,
+    double                     left_pt,
+    double                     top_pt,
+    const table_style_t&       style,
     const Measurement_context& metrics)
 {
     Table_row_layout result;
@@ -644,8 +631,8 @@ Table_row_layout layout_table_row(
     }
 
     result.height_pt = table_row_height(table, row_index, columns, style, metrics);
-    double table_width = width_sum(columns.widths_pt);
-    const bool is_header = table.has_header && row_index == 0;
+    double     table_width = width_sum(columns.widths_pt);
+    const bool is_header   = table.has_header && row_index == 0;
     if (is_header) {
         result.elements.push_back(table_fill_rect_t{
             left_pt,
@@ -656,18 +643,18 @@ Table_row_layout layout_table_row(
         });
     }
 
-    double x = left_pt;
+    double      x   = left_pt;
     const auto& row = table.rows[row_index];
     for (int col = 0; col < columns.column_count; ++col) {
         const double cell_x = x + style.cell_padding_pt;
-        double cell_y = top_pt + style.cell_padding_pt;
-        const auto runs = table_cell_runs(row, col, is_header);
+        double       cell_y = top_pt + style.cell_padding_pt;
+        const auto   runs   = table_cell_runs(row, col, is_header);
         for (const auto& line : wrap_runs(
-                 runs,
-                 columns.widths_pt[col] - 2.0 * style.cell_padding_pt,
-                 style.text_size_pt,
-                 style.text_leading_pt,
-                 metrics))
+            runs,
+            columns.widths_pt[col] - 2.0 * style.cell_padding_pt,
+            style.text_size_pt,
+            style.text_leading_pt,
+            metrics))
         {
             double text_x = cell_x;
             for (const auto& [text, inline_style] : line.spans) {

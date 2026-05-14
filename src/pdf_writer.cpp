@@ -43,33 +43,19 @@ std::string number_to_string(T value)
 
     if (out.find('.') != std::string::npos) {
         const std::size_t last = out.find_last_not_of('0');
-        if (last != std::string::npos) {
-            out.erase(last + 1);
-        }
-        if (!out.empty() && out.back() == '.') {
-            out.pop_back();
-        }
+        if (last != std::string::npos)         { out.erase(last + 1); }
+        if (!out.empty() && out.back() == '.') { out.pop_back();      }
     }
-    if (out == "-0") {
-        out = "0";
-    }
-    if (out.empty()) {
-        out = "0";
-    }
+    if (out == "-0") { out = "0"; }
+    if (out.empty()) { out = "0"; }
     return out;
 }
 
 double clamp_unit(double v)
 {
-    if (!std::isfinite(v)) {
-        return 0.0;
-    }
-    if (v < 0.0) {
-        return 0.0;
-    }
-    if (v > 1.0) {
-        return 1.0;
-    }
+    if (!std::isfinite(v)) { return 0.0; }
+    if (v < 0.0)           { return 0.0; }
+    if (v > 1.0)           { return 1.0; }
     return v;
 }
 
@@ -91,9 +77,9 @@ std::string utf16be_hex_from_codepoint(std::uint32_t codepoint)
         out += hex_byte(static_cast<std::uint8_t>(u & 0xFF));
     }
     else {
-        const std::uint32_t cp = codepoint - 0x10000;
+        const std::uint32_t cp   = codepoint - 0x10000;
         const std::uint16_t high = static_cast<std::uint16_t>(0xD800 + (cp >> 10));
-        const std::uint16_t low = static_cast<std::uint16_t>(0xDC00 + (cp & 0x3FF));
+        const std::uint16_t low  = static_cast<std::uint16_t>(0xDC00 + (cp & 0x3FF));
         out += hex_byte(static_cast<std::uint8_t>((high >> 8) & 0xFF));
         out += hex_byte(static_cast<std::uint8_t>(high & 0xFF));
         out += hex_byte(static_cast<std::uint8_t>((low >> 8) & 0xFF));
@@ -133,8 +119,8 @@ std::vector<std::uint16_t> sorted_used_glyphs(const std::unordered_set<std::uint
 } // namespace
 
 Pdf_writer::Pdf_writer(
-    double page_width_pt,
-    double page_height_pt,
+    double                                     page_width_pt,
+    double                                     page_height_pt,
     std::shared_ptr<const Measurement_context> metrics)
 :
     m_page_width_pt(page_width_pt),
@@ -234,16 +220,16 @@ namespace {
 // Builds `<< /Length N [/Filter /FlateDecode] [extra] >>\nstream\n...payload...\nendstream`.
 // Compresses when the result is strictly smaller than the raw payload.
 std::string build_stream_object(
-    const unsigned char* data,
-    std::size_t          size,
-    const std::string&   extra_dict_entries = {})
+    const unsigned char*   data,
+    std::size_t            size,
+    const std::string&     extra_dict_entries = {})
 {
     const std::string raw(reinterpret_cast<const char*>(data), size);
-    const std::string compressed = flate_encode_raw(data, size);
-    const bool use_compressed = !compressed.empty() && compressed.size() < raw.size();
-    const std::string& payload = use_compressed ? compressed : raw;
+    const std::string compressed     = flate_encode_raw(data, size);
+    const bool        use_compressed = !compressed.empty() && compressed.size() < raw.size();
 
-    std::string out = "<< /Length " + std::to_string(payload.size());
+    const std::string& payload = use_compressed ? compressed : raw;
+    std::string        out     = "<< /Length " + std::to_string(payload.size());
     if (use_compressed) {
         out += " /Filter /FlateDecode";
     }
@@ -262,7 +248,9 @@ std::string build_stream_object(const std::string& payload, const std::string& e
         extra);
 }
 
-std::string build_stream_object(const std::vector<std::uint8_t>& payload, const std::string& extra = {})
+std::string build_stream_object(
+    const std::vector<std::uint8_t>&   payload,
+    const std::string&                 extra = {})
 {
     return build_stream_object(payload.data(), payload.size(), extra);
 }
@@ -330,21 +318,21 @@ public:
     }
 
 private:
-    int m_count = 0;
-    std::vector<std::string> m_bodies = std::vector<std::string>(1); // index 0 unused (free entry)
+    int                        m_count  = 0;
+    std::vector<std::string>   m_bodies = std::vector<std::string>(1); // index 0 unused (free entry)
 };
 
 } // namespace
 
 std::string Pdf_writer::utf8_to_hex_cid_string(
-    const True_type_font& font,
-    Loaded_font& loaded,
-    const std::string& text)
+    const True_type_font&  font,
+    Loaded_font&           loaded,
+    const std::string&     text)
 {
     std::vector<std::uint16_t> gids;
     gids.reserve(text.size());
     for (std::uint32_t cp : utf8::decode(text)) {
-        std::uint16_t gid = font.glyph_for_codepoint(cp);
+        std::uint16_t gid         = font.glyph_for_codepoint(cp);
         std::uint32_t recorded_cp = cp;
         if (gid == 0) {
             const std::uint16_t fallback = font.glyph_for_codepoint('?');
@@ -364,31 +352,31 @@ std::string Pdf_writer::utf8_to_hex_cid_string(
 }
 
 void Pdf_writer::draw_text(
-    double x_pt,
-    double y_top_pt,
-    double size_pt,
-    Pdf_font font,
+    double             x_pt,
+    double             y_top_pt,
+    double             size_pt,
+    Pdf_font           font,
     const std::string& text)
 {
     draw_text(x_pt, y_top_pt, size_pt, font, text, { 0.0, 0.0, 0.0 });
 }
 
 void Pdf_writer::draw_text(
-    double x_pt,
-    double y_top_pt,
-    double size_pt,
-    Pdf_font font,
+    double             x_pt,
+    double             y_top_pt,
+    double             size_pt,
+    Pdf_font           font,
     const std::string& text,
-    const color_t& color)
+    const color_t&     color)
 {
     if (!m_metrics) {
         return;
     }
 
-    auto& slot = m_fonts[static_cast<std::size_t>(font)];
-    const auto& face = m_metrics->font_face(font);
+    auto&             slot    = m_fonts[static_cast<std::size_t>(font)];
+    const auto&       face    = m_metrics->font_face(font);
     const std::string encoded = utf8_to_hex_cid_string(face, slot, text);
-    auto& out = current_content();
+    auto&             out     = current_content();
     out += "q\n";
     append_color(out, color, false);
     out += "BT\n";
@@ -396,13 +384,18 @@ void Pdf_writer::draw_text(
     out.push_back(' ');
     out += number_to_string(size_pt);
     out += " Tf\n";
-    out += number_to_string(x_pt) + " " + number_to_string(m_page_height_pt - y_top_pt - size_pt)
-        + " Td\n";
+    out += number_to_string(x_pt) + " " + number_to_string(m_page_height_pt - y_top_pt - size_pt) +
+        " Td\n";
     out += encoded;
     out += " Tj\nET\nQ\n";
 }
 
-bool Pdf_writer::draw_png(double x_pt, double y_top_pt, double w_pt, double h_pt, const Png_image& image)
+bool Pdf_writer::draw_png(
+    double             x_pt,
+    double             y_top_pt,
+    double             w_pt,
+    double             h_pt,
+    const Png_image&   image)
 {
     if (!image.loaded()) {
         return false;
@@ -418,18 +411,18 @@ bool Pdf_writer::draw_png(double x_pt, double y_top_pt, double w_pt, double h_pt
     auto& out = current_content();
     out += "q\n";
     out += number_to_string(w_pt) + " 0 0 " + number_to_string(h_pt) + " "
-        + number_to_string(x_pt) + " " + number_to_string(m_page_height_pt - y_top_pt - h_pt)
-        + " cm\n";
+        + number_to_string(x_pt) + " " + number_to_string(m_page_height_pt - y_top_pt - h_pt) +
+            " cm\n";
     out += m_images.back().resource_name + " Do\nQ\n";
     return true;
 }
 
 bool Pdf_writer::draw_png(
-    double x_pt,
-    double y_top_pt,
-    double w_pt,
-    double h_pt,
-    const fs::path& path)
+    double             x_pt,
+    double             y_top_pt,
+    double             w_pt,
+    double             h_pt,
+    const fs::path&    path)
 {
     Png_image image;
     if (!image.load_from_file(path)) {
@@ -482,46 +475,53 @@ std::string Pdf_writer::make_to_unicode_cmap(const Loaded_font& font)
 }
 
 void Pdf_writer::stroke_rect(
-    double x_pt, double y_top_pt, double w_pt, double h_pt,
-    const color_t& color, double line_width_pt)
+    double         x_pt,
+    double         y_top_pt,
+    double         w_pt,
+    double         h_pt,
+    const color_t& color,
+    double         line_width_pt)
 {
     auto& out = current_content();
     out += "q\n";
     append_color(out, color, true);
     out += number_to_string(line_width_pt) + " w\n";
-    out += number_to_string(x_pt) + " " + number_to_string(m_page_height_pt - y_top_pt - h_pt)
-        + " " + number_to_string(w_pt) + " " + number_to_string(h_pt) + " re\nS\n";
+    out += number_to_string(x_pt) + " " + number_to_string(m_page_height_pt - y_top_pt - h_pt) +
+        " " + number_to_string(w_pt) + " " + number_to_string(h_pt) + " re\nS\n";
     out += "Q\n";
 }
 
 void Pdf_writer::stroke_line(
-    double x1_pt,
-    double y1_top_pt,
-    double x2_pt,
-    double y2_top_pt,
+    double         x1_pt,
+    double         y1_top_pt,
+    double         x2_pt,
+    double         y2_top_pt,
     const color_t& color,
-    double line_width_pt)
+    double         line_width_pt)
 {
     auto& out = current_content();
     out += "q\n";
     append_color(out, color, true);
     out += number_to_string(line_width_pt) + " w\n";
-    out += number_to_string(x1_pt) + " " + number_to_string(m_page_height_pt - y1_top_pt)
-        + " m\n";
-    out += number_to_string(x2_pt) + " " + number_to_string(m_page_height_pt - y2_top_pt)
-        + " l\nS\n";
+    out += number_to_string(x1_pt) + " " + number_to_string(m_page_height_pt - y1_top_pt) +
+        " m\n";
+    out += number_to_string(x2_pt) + " " + number_to_string(m_page_height_pt - y2_top_pt) +
+        " l\nS\n";
     out += "Q\n";
 }
 
 void Pdf_writer::fill_rect(
-    double x_pt, double y_top_pt, double w_pt, double h_pt,
+    double         x_pt,
+    double         y_top_pt,
+    double         w_pt,
+    double         h_pt,
     const color_t& color)
 {
     auto& out = current_content();
     out += "q\n";
     append_color(out, color, false);
-    out += number_to_string(x_pt) + " " + number_to_string(m_page_height_pt - y_top_pt - h_pt)
-        + " " + number_to_string(w_pt) + " " + number_to_string(h_pt) + " re\nf\n";
+    out += number_to_string(x_pt) + " " + number_to_string(m_page_height_pt - y_top_pt - h_pt) +
+        " " + number_to_string(w_pt) + " " + number_to_string(h_pt) + " re\nf\n";
     out += "Q\n";
 }
 
@@ -534,17 +534,17 @@ bool Pdf_writer::save(const fs::path& path) const
     Pdf_object_table table;
 
     const int catalog_id = table.reserve();
-    const int pages_id = table.reserve();
+    const int pages_id   = table.reserve();
 
     const auto used_font_ids = used_fonts(m_fonts);
 
     struct font_object_ids_t
     {
-        int type0 = 0;
-        int file = 0;
-        int descriptor = 0;
-        int cid = 0;
-        int to_unicode = 0;
+        int    type0      = 0;
+        int    file       = 0;
+        int    descriptor = 0;
+        int    cid        = 0;
+        int    to_unicode = 0;
     };
     std::vector<font_object_ids_t> font_objects(used_font_ids.size());
     for (auto& f : font_objects) {
@@ -557,8 +557,8 @@ bool Pdf_writer::save(const fs::path& path) const
 
     struct image_object_ids_t
     {
-        int image = 0;
-        int mask = 0;
+        int    image = 0;
+        int    mask  = 0;
     };
     std::vector<image_object_ids_t> image_objects(m_images.size());
     for (std::size_t i = 0; i < m_images.size(); ++i) {
@@ -570,8 +570,8 @@ bool Pdf_writer::save(const fs::path& path) const
 
     struct page_object_ids_t
     {
-        int content = 0;
-        int page = 0;
+        int    content = 0;
+        int    page    = 0;
     };
     std::vector<page_object_ids_t> page_objects(m_pages.size());
     for (auto& p : page_objects) {
@@ -595,9 +595,9 @@ bool Pdf_writer::save(const fs::path& path) const
 
     for (std::size_t font_index = 0; font_index < used_font_ids.size(); ++font_index) {
         const Pdf_font font_id = used_font_ids[font_index];
-        const auto& slot = m_fonts[static_cast<std::size_t>(font_id)];
-        const auto& face = m_metrics->font_face(font_id);
-        const auto& ids = font_objects[font_index];
+        const auto&    slot    = m_fonts[static_cast<std::size_t>(font_id)];
+        const auto&    face    = m_metrics->font_face(font_id);
+        const auto&    ids     = font_objects[font_index];
 
         table.emit(ids.file, build_stream_object(face.bytes()));
 
@@ -613,7 +613,7 @@ bool Pdf_writer::save(const fs::path& path) const
         const double default_width_1000 = scale_1000(
             static_cast<std::int16_t>(default_width),
             face.units_per_em());
-        const double ascent = scale_1000(face.ascent(), face.units_per_em());
+        const double ascent  = scale_1000(face.ascent(),  face.units_per_em());
         const double descent = scale_1000(face.descent(), face.units_per_em());
         const double cap_height = face.cap_height() != 0
             ? scale_1000(face.cap_height(), face.units_per_em())
@@ -621,12 +621,8 @@ bool Pdf_writer::save(const fs::path& path) const
         const double italic_angle = face.italic_angle();
 
         unsigned flags = 0x04;
-        if (face.is_fixed_pitch()) {
-            flags |= 0x01;
-        }
-        if (italic_angle != 0.0) {
-            flags |= 0x40;
-        }
+        if (face.is_fixed_pitch()) { flags |= 0x01; }
+        if (italic_angle != 0.0)   { flags |= 0x40; }
 
         std::ostringstream descriptor;
         descriptor << "<< /Type /FontDescriptor /FontName /" << m_metrics->font_tag_name(font_id)
@@ -652,7 +648,7 @@ bool Pdf_writer::save(const fs::path& path) const
             const std::uint32_t w1000 = face.units_per_em() == 0
                 ? aw
                 : static_cast<std::uint32_t>((static_cast<std::uint64_t>(aw) * 1000 + face.units_per_em() / 2)
-                                             / face.units_per_em());
+                    / face.units_per_em());
             widths << gid << " [" << w1000 << "] ";
         }
         widths << "]";
@@ -687,15 +683,15 @@ bool Pdf_writer::save(const fs::path& path) const
 
     for (std::size_t i = 0; i < m_images.size(); ++i) {
         const auto& image = m_images[i].image;
-        const auto& ids = image_objects[i];
-        const char* cs = image.color_components() == 1 ? "/DeviceGray" : "/DeviceRGB";
+        const auto& ids   = image_objects[i];
+        const char* cs    = image.color_components() == 1 ? "/DeviceGray" : "/DeviceRGB";
 
         table.emit(
             ids.image,
             build_stream_object(
                 image.pixels(),
                 image_dict(image.width_px(), image.height_px(), cs,
-                           image.has_alpha() ? ids.mask : 0)));
+                    image.has_alpha() ? ids.mask : 0)));
 
         if (image.has_alpha()) {
             table.emit(
@@ -708,7 +704,7 @@ bool Pdf_writer::save(const fs::path& path) const
 
     for (std::size_t i = 0; i < m_pages.size(); ++i) {
         const Page& page = m_pages[i];
-        const auto& ids = page_objects[i];
+        const auto& ids  = page_objects[i];
 
         table.emit(ids.content, build_stream_object(page.content));
 

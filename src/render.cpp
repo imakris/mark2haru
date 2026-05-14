@@ -32,15 +32,16 @@ Pdf_font font_for(Inline_style style)
 
 struct Token
 {
-    std::string text;
-    Inline_style style = Inline_style::NORMAL;
-    bool newline = false;
+    std::string    text;
+    Inline_style   style     = Inline_style::NORMAL;
+    bool           newline   = false;
 };
 
 struct Line
 {
-    std::vector<std::pair<std::string, Inline_style>> spans;
-    double height_pt = 0.0;
+    std::vector<std::pair<std::string, Inline_style>>
+                   spans;
+    double         height_pt = 0.0;
 };
 
 std::vector<Token> tokenize_runs(const std::vector<Inline_run>& runs)
@@ -82,11 +83,11 @@ std::vector<Token> tokenize_runs(const std::vector<Inline_run>& runs)
 
 template <class MeasureFn>
 std::vector<Line> wrap_tokens(
-    const std::vector<Token>& tokens,
-    double max_width_pt,
-    double size_pt,
-    double leading,
-    MeasureFn&& measure)
+    const std::vector<Token>&  tokens,
+    double                     max_width_pt,
+    double                     size_pt,
+    double                     leading,
+    MeasureFn&&                measure)
 {
     std::vector<Line> lines;
     Line current;
@@ -114,9 +115,9 @@ std::vector<Line> wrap_tokens(
         std::string fragment;
         double fragment_width = 0.0;
         for (const auto& piece : utf8::split_pieces(word)) {
-            const double ch_width = measure(font_for(style), piece, size_pt);
-            const double projected = current_width + fragment_width + ch_width;
-            const bool any_content_on_line = current_width > 0.0 || fragment_width > 0.0;
+            const double ch_width            = measure(font_for(style), piece, size_pt);
+            const double projected           = current_width + fragment_width + ch_width;
+            const bool   any_content_on_line = current_width > 0.0 || fragment_width > 0.0;
             if (any_content_on_line && projected > max_width_pt) {
                 if (!fragment.empty()) {
                     current.spans.emplace_back(fragment, style);
@@ -166,10 +167,10 @@ std::vector<Line> wrap_tokens(
 template <class MeasureFn>
 std::vector<Line> wrap_runs(
     const std::vector<Inline_run>& runs,
-    double max_width_pt,
-    double size_pt,
-    double leading,
-    MeasureFn&& measure)
+    double                         max_width_pt,
+    double                         size_pt,
+    double                         leading,
+    MeasureFn&&                    measure)
 {
     return wrap_tokens(tokenize_runs(runs), max_width_pt, size_pt, leading, measure);
 }
@@ -236,10 +237,10 @@ std::string list_marker(const List_block& lb, size_t index)
 template <class MeasureFn>
 std::vector<Line> code_lines(
     const std::string& text,
-    double max_width_pt,
-    double size_pt,
-    double leading,
-    MeasureFn&& measure)
+    double             max_width_pt,
+    double             size_pt,
+    double             leading,
+    MeasureFn&&        measure)
 {
     std::vector<Line> lines;
     for (const auto& raw : split_lines(text)) {
@@ -257,13 +258,13 @@ std::vector<Line> code_lines(
 } // namespace
 
 bool render_markdown_to_pdf(
-    const std::string& markdown,
-    const fs::path& output_path,
-    const Render_options& options,
-    std::string& error)
+    const std::string&     markdown,
+    const fs::path&        output_path,
+    const Render_options&  options,
+    std::string&           error)
 {
-    const auto blocks = parse_markdown(markdown);
-    auto metrics = std::make_shared<Measurement_context>(options.font_family, options.font_root_dir);
+    const auto blocks  = parse_markdown(markdown);
+    auto       metrics = std::make_shared<Measurement_context>(options.font_family, options.font_root_dir);
     if (!metrics->loaded()) {
         error = metrics->error().empty()
             ? std::string("Failed to load fonts")
@@ -279,13 +280,13 @@ bool render_markdown_to_pdf(
         return false;
     }
 
-    constexpr color_t default_stroke = { 0.2, 0.2, 0.2 };
-    constexpr color_t code_block_fill = { 0.96, 0.96, 0.96 };
+    constexpr color_t default_stroke    = { 0.2, 0.2, 0.2 };
+    constexpr color_t code_block_fill   = { 0.96, 0.96, 0.96 };
     constexpr color_t table_header_fill = { 0.92, 0.92, 0.92 };
-    constexpr double border_line_width = 0.75;
+    constexpr double  border_line_width = 0.75;
 
     const double content_width = options.page_width_pt - options.margin_left_pt - options.margin_right_pt;
-    double cursor_y = options.margin_top_pt;
+    double       cursor_y      = options.margin_top_pt;
 
     auto new_page = [&]() {
         writer.begin_page();
@@ -325,18 +326,18 @@ bool render_markdown_to_pdf(
 
     auto on_paragraph = [&](const Paragraph_block& pb) {
         const auto lines = wrap_runs(pb.runs, content_width, options.body_size_pt,
-                                     options.line_spacing, measure);
+            options.line_spacing, measure);
         ensure_space(total_height(lines) + options.body_size_pt * 0.25);
         cursor_y = draw_lines_at(lines, options.body_size_pt, options.margin_left_pt, cursor_y);
         cursor_y += options.body_size_pt * 0.35;
     };
 
     auto on_heading = [&](const Heading_block& hb) {
-        const auto& hm = heading_metrics(hb.level);
-        const double size = options.body_size_pt * hm.size_factor;
+        const auto&  hm           = heading_metrics(hb.level);
+        const double size         = options.body_size_pt * hm.size_factor;
         const double space_before = size * hm.space_before_factor;
-        const double space_after = size * hm.space_after_factor;
-        const auto lines = wrap_runs(hb.runs, content_width, size, 1.15, measure);
+        const double space_after  = size * hm.space_after_factor;
+        const auto   lines        = wrap_runs(hb.runs, content_width, size, 1.15, measure);
         ensure_space(space_before + total_height(lines) + space_after);
         cursor_y += space_before;
         cursor_y = draw_lines_at(lines, size, options.margin_left_pt, cursor_y);
@@ -346,12 +347,16 @@ bool render_markdown_to_pdf(
     auto on_list = [&](const List_block& lb) {
         const double gap = options.body_size_pt * 0.55;
         for (size_t i = 0; i < lb.items.size(); ++i) {
-            const std::string marker = list_marker(lb, i);
-            const double marker_width = measure(Pdf_font::REGULAR, marker, options.body_size_pt);
-            const double item_left = options.margin_left_pt + marker_width + gap;
-            const double item_width = content_width - marker_width - gap;
-            const auto lines = wrap_runs(lb.items[i].runs, item_width, options.body_size_pt,
-                                         options.line_spacing, measure);
+            const std::string marker       = list_marker(lb, i);
+            const double      marker_width = measure(Pdf_font::REGULAR, marker, options.body_size_pt);
+            const double      item_left    = options.margin_left_pt + marker_width + gap;
+            const double      item_width   = content_width - marker_width - gap;
+            const auto lines = wrap_runs(
+                lb.items[i].runs,
+                item_width,
+                options.body_size_pt,
+                options.line_spacing,
+                measure);
             ensure_space(total_height(lines) + options.body_size_pt * 0.2);
             writer.draw_text(
                 options.margin_left_pt, cursor_y,
@@ -380,10 +385,10 @@ bool render_markdown_to_pdf(
             return;
         }
 
-        const double natural_width_pt = static_cast<double>(image.width_px()) * 72.0 / 96.0;
+        const double natural_width_pt  = static_cast<double>(image.width_px()) * 72.0 / 96.0;
         const double natural_height_pt = static_cast<double>(image.height_px()) * 72.0 / 96.0;
-        double image_width_pt = std::min(natural_width_pt, content_width);
-        double image_height_pt = image_width_pt * natural_height_pt / natural_width_pt;
+        double       image_width_pt    = std::min(natural_width_pt, content_width);
+        double       image_height_pt   = image_width_pt * natural_height_pt / natural_width_pt;
 
         const double available_height =
             options.page_height_pt - options.margin_bottom_pt - options.margin_top_pt;
@@ -399,17 +404,17 @@ bool render_markdown_to_pdf(
     };
 
     auto on_code = [&](const Code_block& cb) {
-        const double size = options.body_size_pt * 0.92;
-        const double pad = options.body_size_pt * 0.45;
+        const double size            = options.body_size_pt * 0.92;
+        const double pad             = options.body_size_pt * 0.45;
         const double available_width = content_width - pad * 2.0;
-        const auto lines = code_lines(cb.text, available_width, size, 1.25, measure);
-        const double height = total_height(lines) + pad * 2.0;
+        const auto   lines           = code_lines(cb.text, available_width, size, 1.25, measure);
+        const double height          = total_height(lines) + pad * 2.0;
         ensure_space(height + options.body_size_pt * 0.2);
         writer.fill_rect(options.margin_left_pt, cursor_y, content_width, height,
-                         code_block_fill);
+            code_block_fill);
         draw_lines_at(lines, size, options.margin_left_pt + pad, cursor_y + pad);
         writer.stroke_rect(options.margin_left_pt, cursor_y, content_width, height,
-                           default_stroke, border_line_width);
+            default_stroke, border_line_width);
         cursor_y += height + options.body_size_pt * 0.25;
     };
 
@@ -426,16 +431,16 @@ bool render_markdown_to_pdf(
             return;
         }
 
-        const double cell_pad = options.body_size_pt * 0.35;
-        const double cell_size = options.body_size_pt * 0.95;
-        const double col_width = content_width / static_cast<double>(column_count);
+        const double cell_pad    = options.body_size_pt * 0.35;
+        const double cell_size   = options.body_size_pt * 0.95;
+        const double col_width   = content_width / static_cast<double>(column_count);
         const double inner_width = col_width - cell_pad * 2.0;
         std::vector<std::vector<std::vector<Line>>> cell_lines(tb.rows.size());
         std::vector<double> row_heights(tb.rows.size(), 0.0);
         for (size_t r = 0; r < tb.rows.size(); ++r) {
             cell_lines[r].resize(column_count);
-            const auto& row = tb.rows[r];
-            double row_height = 0.0;
+            const auto& row        = tb.rows[r];
+            double      row_height = 0.0;
             for (size_t col = 0; col < column_count; ++col) {
                 const std::vector<Inline_run> empty;
                 const auto& runs = col < row.cells.size() ? row.cells[col].runs : empty;
@@ -448,18 +453,18 @@ bool render_markdown_to_pdf(
 
         auto draw_row = [&](size_t row_idx) {
             const double row_height = row_heights[row_idx];
-            const bool header = tb.has_header && row_idx == 0;
+            const bool   header     = tb.has_header && row_idx == 0;
             if (header) {
                 writer.fill_rect(options.margin_left_pt, cursor_y, content_width, row_height,
-                                 table_header_fill);
+                    table_header_fill);
             }
 
             double x = options.margin_left_pt;
             for (size_t col = 0; col < column_count; ++col) {
                 writer.stroke_rect(x, cursor_y, col_width, row_height,
-                                   default_stroke, border_line_width);
+                    default_stroke, border_line_width);
                 draw_lines_at(cell_lines[row_idx][col], cell_size,
-                              x + cell_pad, cursor_y + cell_pad);
+                    x + cell_pad, cursor_y + cell_pad);
                 x += col_width;
             }
             cursor_y += row_height;
@@ -482,8 +487,8 @@ bool render_markdown_to_pdf(
         }
 
         for (size_t row_idx = body_start; row_idx < tb.rows.size(); ++row_idx) {
-            const double row_height = row_heights[row_idx];
-            const bool fits_on_page =
+            const double row_height   = row_heights[row_idx];
+            const bool   fits_on_page =
                 cursor_y + row_height <= options.page_height_pt - options.margin_bottom_pt;
             if (!fits_on_page) {
                 // If the row is taller than a full page there's nothing
@@ -507,10 +512,10 @@ bool render_markdown_to_pdf(
     };
 
     auto on_thematic_break = [&](const Thematic_break_block&) {
-        constexpr color_t rule_color = { 0.5, 0.5, 0.5 };
-        constexpr double rule_width_pt = 0.5;
-        const double space_before = options.body_size_pt * 0.5;
-        const double space_after  = options.body_size_pt * 0.5;
+        constexpr color_t rule_color    = { 0.5, 0.5, 0.5 };
+        constexpr double  rule_width_pt = 0.5;
+        const double      space_before  = options.body_size_pt * 0.5;
+        const double      space_after   = options.body_size_pt * 0.5;
         ensure_space(space_before + rule_width_pt + space_after);
         cursor_y += space_before;
         writer.stroke_line(
@@ -546,9 +551,9 @@ bool render_markdown_to_pdf(
 }
 
 bool render_markdown_to_pdf(
-    const std::string& markdown,
-    const fs::path& output_path,
-    const Render_options& options)
+    const std::string&     markdown,
+    const fs::path&        output_path,
+    const Render_options&  options)
 {
     std::string scratch;
     return render_markdown_to_pdf(markdown, output_path, options, scratch);

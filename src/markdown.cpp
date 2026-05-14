@@ -22,14 +22,11 @@ bool is_word_char(char c)
 bool is_thematic_break(std::string_view trimmed)
 {
     char marker = 0;
-    int count = 0;
+    int  count  = 0;
     for (char c : trimmed) {
-        if (c == ' ' || c == '\t') {
-            continue;
-        }
-        if (c != '-' && c != '_' && c != '*') {
-            return false;
-        }
+        if (c == ' ' || c == '\t')            { continue;     }
+        if (c != '-' && c != '_' && c != '*') { return false; }
+
         if (marker == 0) {
             marker = c;
         }
@@ -103,7 +100,7 @@ size_t find_closing_underscore(std::string_view s, size_t start, size_t delim_le
         }
 
         const bool extends = pos + delim_len < s.size() && s[pos + delim_len] == '_';
-        const char after = pos + delim_len < s.size() ? s[pos + delim_len] : ' ';
+        const char after   = pos + delim_len < s.size() ? s[pos + delim_len] : ' ';
         if (!extends && !is_word_char(after)) {
             return pos;
         }
@@ -113,15 +110,30 @@ size_t find_closing_underscore(std::string_view s, size_t start, size_t delim_le
 
 bool is_escapable(char c)
 {
-    return c == '\\' || c == '`' || c == '*' || c == '_' || c == '{' || c == '}'
-        || c == '[' || c == ']' || c == '(' || c == ')' || c == '#' || c == '+'
-        || c == '-' || c == '.' || c == '!' || c == '|' || c == '~';
+    return
+        c == '\\' ||
+        c == '`'  ||
+        c == '*'  ||
+        c == '_'  ||
+        c == '{'  ||
+        c == '}'  ||
+        c == '['  ||
+        c == ']'  ||
+        c == '('  ||
+        c == ')'  ||
+        c == '#'  ||
+        c == '+'  ||
+        c == '-'  ||
+        c == '.'  ||
+        c == '!'  ||
+        c == '|'  ||
+        c == '~';
 }
 
 size_t find_link_close(std::string_view s, size_t open)
 {
-    int depth = 1;
-    size_t pos = open + 1;
+    int    depth = 1;
+    size_t pos   = open + 1;
     while (pos < s.size()) {
         const char c = s[pos];
         if (c == '\n') {
@@ -207,17 +219,18 @@ std::vector<Inline_run> parse_inline(const std::string& text)
             continue;
         }
 
-        if (text[i] == '*'
-            && try_emphasis('*', [&](size_t s, size_t l) {
-                return find_run_of_length(text, s, l, '*');
-            })) {
+        if (text[i] == '*' &&
+            try_emphasis(
+                '*', [&](size_t s, size_t l) { return find_run_of_length(text, s, l, '*'); }))
+        {
             continue;
         }
 
-        if (text[i] == '_' && can_open_underscore(i)
-            && try_emphasis('_', [&](size_t s, size_t l) {
-                return find_closing_underscore(text, s, l);
-            })) {
+        if (text[i] == '_'         &&
+            can_open_underscore(i) &&
+            try_emphasis(
+                '_', [&](size_t s, size_t l) { return find_closing_underscore(text, s, l); }))
+        {
             continue;
         }
 
@@ -286,9 +299,9 @@ struct Classified_line
         THEMATIC_BREAK,
         TEXT,
     } type = Type::TEXT;
-    std::string content;
-    int heading_level = 0;
-    int list_number = 0;
+    std::string    content;
+    int            heading_level = 0;
+    int            list_number   = 0;
 };
 
 Classified_line classify_line(const std::string& line)
@@ -322,9 +335,10 @@ Classified_line classify_line(const std::string& line)
         return { Classified_line::Type::THEMATIC_BREAK, {}, 0, 0 };
     }
 
-    if (trimmed.size() >= 2
-        && (trimmed[0] == '-' || trimmed[0] == '*' || trimmed[0] == '+')
-        && trimmed[1] == ' ') {
+    if (trimmed.size() >= 2                                           &&
+        (trimmed[0] == '-' || trimmed[0] == '*' || trimmed[0] == '+') &&
+        trimmed[1]     == ' ')
+    {
         return { Classified_line::Type::BULLET_ITEM, trim(trimmed.substr(2)), 0, 0 };
     }
 
@@ -335,8 +349,8 @@ Classified_line classify_line(const std::string& line)
     if (pos > 0 && pos + 1 < trimmed.size() && trimmed[pos] == '.' && trimmed[pos + 1] == ' ') {
         // std::atoi is undefined on overflow; std::from_chars reports it
         // explicitly. Clamp overflow so callers get a deterministic marker.
-        int start = 1;
-        const char* begin = trimmed.data();
+        int                          start  = 1;
+        const char*                  begin  = trimmed.data();
         const std::from_chars_result result = std::from_chars(begin, begin + pos, start);
         if (result.ec != std::errc{}) {
             start = INT_MAX;
@@ -382,12 +396,8 @@ std::vector<std::string> split_table_cells(const std::string& row)
 {
     std::vector<std::string> cells;
     std::string working = row;
-    if (!working.empty() && working.front() == '|') {
-        working.erase(0, 1);
-    }
-    if (!working.empty() && working.back() == '|') {
-        working.pop_back();
-    }
+    if (!working.empty() && working.front() == '|') { working.erase(0, 1); }
+    if (!working.empty() && working.back() == '|')  { working.pop_back();  }
     size_t i = 0;
     while (i <= working.size()) {
         const size_t pipe = working.find('|', i);
@@ -403,10 +413,10 @@ std::vector<std::string> split_table_cells(const std::string& row)
 
 Image_content_block parse_image_line(const std::string& line)
 {
-    const size_t alt_start = 2;
-    const size_t alt_end = line.find("](", alt_start);
+    const size_t alt_start  = 2;
+    const size_t alt_end    = line.find("](", alt_start);
     const size_t path_start = alt_end + 2;
-    const size_t path_end = find_link_close(line, alt_end + 1);
+    const size_t path_end   = find_link_close(line, alt_end + 1);
     return {
         line.substr(path_start, path_end - path_start),
         line.substr(alt_start, alt_end - alt_start)
@@ -419,7 +429,7 @@ std::vector<Block> parse_markdown(const std::string& input)
 {
     std::vector<Block> blocks;
     const auto lines = split_lines(input);
-    size_t i = 0;
+    size_t     i     = 0;
     std::string paragraph_accum;
 
     auto flush_paragraph = [&]() {
@@ -497,7 +507,7 @@ std::vector<Block> parse_markdown(const std::string& input)
 
                 while (i < lines.size()) {
                     const Classified_line item_line = classify_line(lines[i]);
-                    const bool matching =
+                    const bool            matching  =
                         (ordered && item_line.type == Classified_line::Type::ORDERED_ITEM)
                         || (!ordered && item_line.type == Classified_line::Type::BULLET_ITEM);
                     if (matching) {
@@ -541,8 +551,9 @@ std::vector<Block> parse_markdown(const std::string& input)
                 break;
 
             case Classified_line::Type::TABLE_ROW: {
-                if (i + 1 < lines.size()
-                    && classify_line(lines[i + 1]).type == Classified_line::Type::TABLE_SEPARATOR) {
+                if (i + 1                            <  lines.size() &&
+                    classify_line(lines[i + 1]).type == Classified_line::Type::TABLE_SEPARATOR)
+                {
                     flush_paragraph();
                     Table_block table;
                     while (i < lines.size()) {

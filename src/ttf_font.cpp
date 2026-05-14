@@ -35,7 +35,7 @@ public:
         }
         return static_cast<std::uint16_t>(
             (static_cast<std::uint16_t>(m_data[off    ]) << 8) |
-             static_cast<std::uint16_t>(m_data[off + 1]));
+             static_cast<std::uint16_t>(m_data[off + 1])     );
     }
 
     std::int16_t i16(std::size_t off) const
@@ -48,10 +48,11 @@ public:
         if (!has(off, 4)) {
             return 0;
         }
-        return  (static_cast<std::uint32_t>(m_data[off    ]) << 24)
-              | (static_cast<std::uint32_t>(m_data[off + 1]) << 16)
-              | (static_cast<std::uint32_t>(m_data[off + 2]) <<  8)
-              |  static_cast<std::uint32_t>(m_data[off + 3]);
+        return
+            (static_cast<std::uint32_t>(m_data[off    ]) << 24) |
+            (static_cast<std::uint32_t>(m_data[off + 1]) << 16) |
+            (static_cast<std::uint32_t>(m_data[off + 2]) <<  8) |
+             static_cast<std::uint32_t>(m_data[off + 3]);
     }
 
     std::string string_at(std::size_t off, std::size_t len) const
@@ -63,8 +64,8 @@ public:
     }
 
 private:
-    const std::uint8_t* m_data = nullptr;
-    std::size_t m_size = 0;
+    const std::uint8_t*    m_data = nullptr;
+    std::size_t            m_size = 0;
 };
 
 } // namespace
@@ -124,21 +125,17 @@ bool True_type_font::load_from_file(const fs::path& path)
         std::size_t           relative_offset,
         std::size_t           size)
     {
-        if (relative_offset > rec->length) {
-            return false;
-        }
-        if (size > rec->length - relative_offset) {
-            return false;
-        }
+        if (relative_offset > rec->length)        { return false; }
+        if (size > rec->length - relative_offset) { return false; }
         return bv.has(rec->offset + relative_offset, size);
     };
     if (!field_in_table(head, 12, 4) ||
         !field_in_table(head, 18, 2) ||
         !field_in_table(head, 36, 8) ||
-        !field_in_table(hhea,  4, 6) ||
+        !field_in_table(hhea, 4, 6)  ||
         !field_in_table(hhea, 34, 2) ||
-        !field_in_table(maxp,  4, 2) ||
-        !field_in_table(cmap,  2, 2))
+        !field_in_table(maxp, 4, 2)  ||
+        !field_in_table(cmap, 2, 2))
     {
         m_file_bytes.clear();
         return false;
@@ -193,9 +190,9 @@ bool True_type_font::load_from_file(const fs::path& path)
     }
 
     m_advance_widths.assign(m_num_glyphs, 0);
-    std::size_t pos = hmtx->offset;
-    const std::size_t hmtx_end = hmtx->offset + hmtx->length;
-    std::uint16_t last_advance = 0;
+    std::size_t       pos          = hmtx->offset;
+    const std::size_t hmtx_end     = hmtx->offset + hmtx->length;
+    std::uint16_t     last_advance = 0;
     for (std::uint16_t gid = 0; gid < m_num_glyphs; ++gid) {
         if (gid < m_num_hmetrics) {
             if (pos > hmtx_end || hmtx_end - pos < 4) {
@@ -218,7 +215,7 @@ bool True_type_font::load_from_file(const fs::path& path)
         return false;
     }
     const std::uint16_t sub_count = bv.u16(cmap->offset + 2);
-    const std::size_t cmap_end = cmap->offset + cmap->length;
+    const std::size_t   cmap_end  = cmap->offset + cmap->length;
     for (std::uint16_t i = 0; i < sub_count; ++i) {
         const std::size_t subtable = cmap->offset + 4 + static_cast<std::size_t>(i) * 8;
         if (subtable > cmap_end || cmap_end - subtable < 8) {
@@ -226,8 +223,8 @@ bool True_type_font::load_from_file(const fs::path& path)
             return false;
         }
         const std::uint16_t platform_id = bv.u16(subtable);
-        const std::uint32_t rel_offset = bv.u32(subtable + 4);
-        const std::size_t table = cmap->offset + static_cast<std::size_t>(rel_offset);
+        const std::uint32_t rel_offset  = bv.u32(subtable + 4);
+        const std::size_t   table       = cmap->offset + static_cast<std::size_t>(rel_offset);
         if (table > cmap_end || cmap_end - table < 2) {
             continue;
         }
@@ -272,12 +269,8 @@ std::uint16_t True_type_font::lookup_cmap12(std::uint32_t codepoint) const
         const std::uint32_t start_char = bv.u32(group);
         const std::uint32_t end_char   = bv.u32(group + 4);
         const std::uint32_t start_gid  = bv.u32(group + 8);
-        if (codepoint < start_char) {
-            break;
-        }
-        if (codepoint <= end_char) {
-            return static_cast<std::uint16_t>(start_gid + (codepoint - start_char));
-        }
+        if (codepoint <  start_char) { break;                                                                   }
+        if (codepoint <= end_char)   { return static_cast<std::uint16_t>(start_gid + (codepoint - start_char)); }
     }
     return 0;
 }
@@ -292,7 +285,7 @@ std::uint16_t True_type_font::lookup_cmap4(std::uint32_t codepoint) const
         return 0;
     }
     const std::uint16_t seg_count_x2 = bv.u16(m_cmap4.offset + 6);
-    const std::uint16_t seg_count = seg_count_x2 / 2;
+    const std::uint16_t seg_count    = seg_count_x2 / 2;
 
     const std::size_t end_codes        = m_cmap4.offset + 14;
     const std::size_t start_codes      = end_codes  + static_cast<std::size_t>(seg_count) * 2 + 2;
@@ -337,24 +330,16 @@ std::uint16_t True_type_font::glyph_for_codepoint(std::uint32_t codepoint) const
     }
 
     std::uint16_t gid = lookup_cmap12(codepoint);
-    if (gid == 0) {
-        gid = lookup_cmap4(codepoint);
-    }
-    if (m_glyph_cache.size() >= 4096) {
-        m_glyph_cache.clear();
-    }
+    if (gid == 0)                     { gid = lookup_cmap4(codepoint); }
+    if (m_glyph_cache.size() >= 4096) { m_glyph_cache.clear();         }
     m_glyph_cache[codepoint] = gid;
     return gid;
 }
 
 std::uint16_t True_type_font::advance_width_for_gid(std::uint16_t gid) const
 {
-    if (m_advance_widths.empty()) {
-        return 0;
-    }
-    if (gid < m_advance_widths.size()) {
-        return m_advance_widths[gid];
-    }
+    if (m_advance_widths.empty())      { return 0;                     }
+    if (gid < m_advance_widths.size()) { return m_advance_widths[gid]; }
     return m_advance_widths.back();
 }
 

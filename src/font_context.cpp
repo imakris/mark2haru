@@ -16,8 +16,8 @@ namespace fs = std::filesystem;
 
 struct slot_descriptor_t
 {
-    const char* base14;
-    const char* tag;
+    const char*                base14;
+    const char*                tag;
     std::array<const char*, 5> candidates;
 };
 
@@ -40,9 +40,9 @@ const slot_descriptor_t& slot_descriptor(Pdf_font font)
 }
 
 bool try_dir(
-    const fs::path&                       dir,
-    const std::array<const char*, 5>&     candidates,
-    fs::path&                             out)
+    const fs::path&                    dir,
+    const std::array<const char*, 5>&  candidates,
+    fs::path&                          out)
 {
     for (const char* candidate : candidates) {
         const auto p = dir / candidate;
@@ -89,7 +89,7 @@ std::vector<fs::path> search_roots(const fs::path& font_root)
     std::string home_str;
 #if defined(_MSC_VER)
     {
-        char* raw = nullptr;
+        char*  raw     = nullptr;
         size_t raw_len = 0;
         if (_dupenv_s(&raw, &raw_len, "HOME") == 0 && raw != nullptr) {
             home_str = raw;
@@ -141,8 +141,8 @@ std::string Measurement_context::slot_tag_name(Pdf_font font)
 
 fs::path Measurement_context::resolve_font_path(
     const Font_source& source,
-    const fs::path& font_root,
-    Pdf_font font)
+    const fs::path&    font_root,
+    Pdf_font           font)
 {
     const auto& candidates = slot_descriptor(font).candidates;
 
@@ -159,12 +159,8 @@ fs::path Measurement_context::resolve_font_path(
         if (fs::is_regular_file(source.path, ec) && !ec) {
             return source.path;
         }
-        if (auto resolved = search_dir(source.path); !resolved.empty()) {
-            return resolved;
-        }
-        if (auto resolved = search_dir(source.path / "fonts"); !resolved.empty()) {
-            return resolved;
-        }
+        if (auto resolved = search_dir(source.path); !resolved.empty())           { return resolved; }
+        if (auto resolved = search_dir(source.path / "fonts"); !resolved.empty()) { return resolved; }
     }
 
     for (const auto& root : search_roots(font_root)) {
@@ -176,13 +172,13 @@ fs::path Measurement_context::resolve_font_path(
 }
 
 Measurement_context::Measurement_context(
-    const Font_family_config& family,
-    const fs::path& font_root)
+    const Font_family_config&  family,
+    const fs::path&            font_root)
 {
     for (std::size_t i = 0; i < m_slots.size(); ++i) {
-        const Pdf_font font = static_cast<Pdf_font>(i);
+        const Pdf_font    font   = static_cast<Pdf_font>(i);
         const Font_source source = slot_source(family, font);
-        const auto path = resolve_font_path(source, font_root, font);
+        const auto        path   = resolve_font_path(source, font_root, font);
         if (path.empty()) {
             m_error = "Unable to resolve font for " + default_base14_name(font);
             return;
@@ -208,10 +204,13 @@ const std::string& Measurement_context::font_tag_name(Pdf_font font) const
     return m_slots[static_cast<std::size_t>(font)].tag_name;
 }
 
-double Measurement_context::measure_text_width(Pdf_font font, const std::string& text, double size_pt) const
+double Measurement_context::measure_text_width(
+    Pdf_font           font,
+    const std::string& text,
+    double             size_pt) const
 {
-    const auto& face = font_face(font);
-    double width_units = 0.0;
+    const auto& face        = font_face(font);
+    double      width_units = 0.0;
     for (std::uint32_t cp : utf8::decode(text)) {
         std::uint16_t gid = face.glyph_for_codepoint(cp);
         if (gid == 0) {

@@ -56,14 +56,14 @@ bool compress_bytes(const std::vector<std::uint8_t>& raw, std::vector<std::uint8
 }
 
 bool write_png(
-    const fs::path& path,
-    int width,
-    int height,
-    std::uint8_t bit_depth,
-    std::uint8_t color_type,
-    const std::vector<std::uint8_t>& raw_scanlines,
-    const std::vector<std::uint8_t>* palette = nullptr,
-    const std::vector<std::uint8_t>* trns = nullptr)
+    const fs::path&                    path,
+    int                                width,
+    int                                height,
+    std::uint8_t                       bit_depth,
+    std::uint8_t                       color_type,
+    const std::vector<std::uint8_t>&   raw_scanlines,
+    const std::vector<std::uint8_t>*   palette = nullptr,
+    const std::vector<std::uint8_t>*   trns = nullptr)
 {
     std::vector<std::uint8_t> compressed;
     if (!compress_bytes(raw_scanlines, compressed)) {
@@ -95,12 +95,8 @@ bool write_png(
     ihdr.push_back(0);
     write_chunk(out, "IHDR", ihdr);
 
-    if (palette != nullptr) {
-        write_chunk(out, "PLTE", *palette);
-    }
-    if (trns != nullptr) {
-        write_chunk(out, "tRNS", *trns);
-    }
+    if (palette != nullptr) { write_chunk(out, "PLTE", *palette); }
+    if (trns != nullptr)    { write_chunk(out, "tRNS", *trns);    }
     write_chunk(out, "IDAT", compressed);
     write_chunk(out, "IEND", {});
     return static_cast<bool>(out);
@@ -114,15 +110,21 @@ bool starts_with_pdf_header(const fs::path& path)
     }
     char header[4] = {};
     in.read(header, 4);
-    return in.gcount() == 4 && header[0] == '%' && header[1] == 'P' && header[2] == 'D' && header[3] == 'F';
+    return
+        in.gcount() == 4   &&
+        header[0]   == '%' &&
+        header[1]   == 'P' &&
+        header[2]   == 'D' &&
+        header[3]   == 'F';
 }
 
 // Writes a deliberately-corrupt PNG by emitting the signature plus a list of
 // raw chunk bodies, with no validation of chunk types or order. Used to feed
 // the decoder cases it's expected to reject.
 bool write_raw_png(
-    const fs::path& path,
-    const std::vector<std::pair<std::array<char, 4>, std::vector<std::uint8_t>>>& chunks)
+    const fs::path&        path,
+    const std::vector<std::pair<std::array<char, 4>, std::vector<std::uint8_t>>>&
+                           chunks)
 {
     std::ofstream out(path, std::ios::binary);
     if (!out) {
@@ -142,10 +144,10 @@ bool write_raw_png(
 }
 
 std::vector<std::uint8_t> ihdr_body(
-    std::uint32_t width,
-    std::uint32_t height,
-    std::uint8_t  bit_depth,
-    std::uint8_t  color_type)
+    std::uint32_t  width,
+    std::uint32_t  height,
+    std::uint8_t   bit_depth,
+    std::uint8_t   color_type)
 {
     std::vector<std::uint8_t> body;
     body.reserve(13);
@@ -184,13 +186,13 @@ bool expect_png_load_failure(const fs::path& path, const char* label)
 }
 
 bool expect_png(
-    const fs::path& path,
-    int width,
-    int height,
-    int color_components,
-    bool has_alpha,
-    const std::vector<std::uint8_t>& pixels,
-    const std::vector<std::uint8_t>& alpha)
+    const fs::path&                    path,
+    int                                width,
+    int                                height,
+    int                                color_components,
+    bool                               has_alpha,
+    const std::vector<std::uint8_t>&   pixels,
+    const std::vector<std::uint8_t>&   alpha)
 {
     mark2haru::Png_image image;
     if (!image.load_from_file(path)) {
@@ -236,10 +238,10 @@ int main(int argc, char** argv)
     const fs::path temp_dir = fs::temp_directory_path() / "mark2haru_png_test";
     fs::create_directories(temp_dir);
 
-    const auto gray1_path = temp_dir / "gray1.png";
+    const auto gray1_path   = temp_dir / "gray1.png";
     const auto indexed_path = temp_dir / "indexed.png";
-    const auto rgba16_path = temp_dir / "rgba16.png";
-    const auto pdf_path = temp_dir / "mark2haru_png_test.pdf";
+    const auto rgba16_path  = temp_dir / "rgba16.png";
+    const auto pdf_path     = temp_dir / "mark2haru_png_test.pdf";
 
     if (!write_png(gray1_path, 1, 1, 1, 0, { 0x00, 0x80 })) {
         std::cerr << "failed to write gray1 png\n";
@@ -258,22 +260,15 @@ int main(int argc, char** argv)
     }
 
     if (!write_png(
-            rgba16_path, 1, 1, 16, 6,
-            { 0x00, 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0 }))
+            rgba16_path, 1, 1, 16, 6, { 0x00, 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0 }))
     {
         std::cerr << "failed to write rgba16 png\n";
         return 5;
     }
 
-    if (!expect_png(gray1_path, 1, 1, 1, false, { 0xFF }, {})) {
-        return 6;
-    }
-    if (!expect_png(indexed_path, 1, 1, 3, true, { 0x01, 0x23, 0x45 }, { 17 })) {
-        return 7;
-    }
-    if (!expect_png(rgba16_path, 1, 1, 3, true, { 0x12, 0x56, 0x9A }, { 0xDE })) {
-        return 8;
-    }
+    if (!expect_png(gray1_path,   1, 1, 1, false, { 0xFF },             {}))       { return 6; }
+    if (!expect_png(indexed_path, 1, 1, 3, true,  { 0x01, 0x23, 0x45 }, { 17 }))   { return 7; }
+    if (!expect_png(rgba16_path,  1, 1, 3, true,  { 0x12, 0x56, 0x9A }, { 0xDE })) { return 8; }
 
     auto metrics = std::make_shared<mark2haru::Measurement_context>(
         mark2haru::Font_family_config::briefutil_default(),
@@ -321,8 +316,8 @@ int main(int argc, char** argv)
             { {'I','H','D','R'}, ihdr_body(1, 1, 8, 0) },
             { {'I','E','N','D'}, {} },
         };
-        if (!write_raw_png(path, chunks)
-            || !expect_png_load_failure(path, "chunk before IHDR"))
+        if (!write_raw_png(path, chunks) ||
+            !expect_png_load_failure(path, "chunk before IHDR"))
         {
             return 15;
         }
@@ -335,8 +330,8 @@ int main(int argc, char** argv)
             { {'I','H','D','R'}, ihdr_body(2, 2, 8, 0) },
             { {'I','E','N','D'}, {} },
         };
-        if (!write_raw_png(path, chunks)
-            || !expect_png_load_failure(path, "duplicate IHDR"))
+        if (!write_raw_png(path, chunks) ||
+            !expect_png_load_failure(path, "duplicate IHDR"))
         {
             return 16;
         }
@@ -348,8 +343,8 @@ int main(int argc, char** argv)
             { {'I','H','D','R'}, ihdr_body(1u << 30, 1, 8, 0) },
             { {'I','E','N','D'}, {} },
         };
-        if (!write_raw_png(path, chunks)
-            || !expect_png_load_failure(path, "oversize dimensions"))
+        if (!write_raw_png(path, chunks) ||
+            !expect_png_load_failure(path, "oversize dimensions"))
         {
             return 17;
         }

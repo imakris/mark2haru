@@ -56,8 +56,8 @@ bool expect_text_equals(const std::vector<Inline_run>& runs, const std::string& 
 int main()
 {
     {
-        const auto blocks = parse_markdown(R"(Escaped \*star\* and \_under\_ and \\ slash.)");
-        const auto* para = expect_single_paragraph(blocks);
+        const auto  blocks = parse_markdown(R"(Escaped \*star\* and \_under\_ and \\ slash.)");
+        const auto* para   = expect_single_paragraph(blocks);
         if (!para) {
             return 1;
         }
@@ -73,8 +73,8 @@ int main()
     }
 
     {
-        const auto blocks = parse_markdown("Use ``code ` with tick`` here.");
-        const auto* para = expect_single_paragraph(blocks);
+        const auto  blocks = parse_markdown("Use ``code ` with tick`` here.");
+        const auto* para   = expect_single_paragraph(blocks);
         if (!para) {
             return 4;
         }
@@ -100,8 +100,8 @@ int main()
     }
 
     {
-        const auto blocks = parse_markdown("[doc](https://example.com/a_(b))");
-        const auto* para = expect_single_paragraph(blocks);
+        const auto  blocks = parse_markdown("[doc](https://example.com/a_(b))");
+        const auto* para   = expect_single_paragraph(blocks);
         if (!para) {
             return 9;
         }
@@ -144,12 +144,8 @@ int main()
             std::fprintf(stderr, "unexpected list shape\n");
             return 15;
         }
-        if (!expect_text_equals(list->items[0].runs, "first item continued")) {
-            return 16;
-        }
-        if (!expect_text_equals(list->items[1].runs, "second item")) {
-            return 17;
-        }
+        if (!expect_text_equals(list->items[0].runs, "first item continued")) { return 16; }
+        if (!expect_text_equals(list->items[1].runs, "second item"))          { return 17; }
     }
 
     {
@@ -323,10 +319,10 @@ int main()
             "---\n"
             "\n"
             "after\n");
-        if (blocks.size() != 3
-            || !std::get_if<Paragraph_block     >(&blocks[0])
-            || !std::get_if<Thematic_break_block>(&blocks[1])
-            || !std::get_if<Paragraph_block     >(&blocks[2]))
+        if (blocks.size() != 3                             ||
+            !std::get_if<Paragraph_block     >(&blocks[0]) ||
+            !std::get_if<Thematic_break_block>(&blocks[1]) ||
+            !std::get_if<Paragraph_block     >(&blocks[2]))
         {
             std::fprintf(stderr, "unexpected block shape around thematic break\n");
             return 39;
