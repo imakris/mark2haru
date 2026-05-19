@@ -22,6 +22,25 @@ auto metrics_measurer(const Measurement_context& metrics)
     };
 }
 
+// Returns the smallest value in [lo, hi] for which `fits(value)` is true,
+// approximated by 18 steps of midpoint refinement (~3.8e-6 of the initial
+// range). `fits` is assumed monotone: false below the threshold, true at
+// or above it; `fits(hi)` must already be true at the initial `hi`.
+template <class Predicate>
+double bisect(double lo, double hi, Predicate fits)
+{
+    for (int step = 0; step < 18; ++step) {
+        const double mid = (lo + hi) * 0.5;
+        if (fits(mid)) {
+            hi = mid;
+        }
+        else {
+            lo = mid;
+        }
+    }
+    return hi;
+}
+
 std::vector<Inline_run> table_cell_runs(
     const Table_row&   row,
     int                col,
@@ -156,18 +175,9 @@ double min_content_width_for_line_count(
         return -1.0;
     }
 
-    double lo = current_width_pt;
-    double hi = max_width_pt;
-    for (int step = 0; step < 18; ++step) {
-        const double mid = (lo + hi) * 0.5;
-        if (cell_line_count(runs, mid, style, metrics) <= target_lines) {
-            hi = mid;
-        }
-        else {
-            lo = mid;
-        }
-    }
-    return hi;
+    return bisect(current_width_pt, max_width_pt, [&](double width) {
+        return cell_line_count(runs, width, style, metrics) <= target_lines;
+    });
 }
 
 // Water-fill the room above min_widths. Every column gets at least its
@@ -273,19 +283,13 @@ void tighten_columns(
                 runs, current_content_width, style, metrics);
             if (current_lines <= 0)                                                          { continue; }
             if (cell_line_count(runs, lower_bound_content, style, metrics) <= current_lines) { continue; }
-            double lo = lower_bound_content;
-            double hi = current_content_width;
-            for (int step = 0; step < 18; ++step) {
-                const double mid = (lo + hi) * 0.5;
-                if (cell_line_count(runs, mid, style, metrics) <= current_lines) {
-                    hi = mid;
-                }
-                else {
-                    lo = mid;
-                }
-            }
-            if (hi > needed_content_width) {
-                needed_content_width = hi;
+            const double tightened = bisect(
+                lower_bound_content, current_content_width,
+                [&](double width) {
+                    return cell_line_count(runs, width, style, metrics) <= current_lines;
+                });
+            if (tightened > needed_content_width) {
+                needed_content_width = tightened;
             }
         }
 
@@ -328,24 +332,15 @@ Table_columns optimize_columns(
                 continue;
             }
 
-            double lo = 0.0;
-            double hi = slack;
-            for (int step = 0; step < 18; ++step) {
-                const double  mid   = (lo + hi) * 0.5;
+            const double extra = bisect(0.0, slack, [&](double delta) {
                 Table_columns probe = columns;
-                probe.widths_pt[col] += mid;
-                if (table_total_height(table, probe, style, metrics) + k_height_epsilon_pt
-                    < current_height)
-                {
-                    hi = mid;
-                }
-                else {
-                    lo = mid;
-                }
-            }
+                probe.widths_pt[col] += delta;
+                return table_total_height(table, probe, style, metrics) + k_height_epsilon_pt
+                    < current_height;
+            });
 
             Table_columns candidate = columns;
-            candidate.widths_pt[col] += hi;
+            candidate.widths_pt[col] += extra;
             const double candidate_height = table_total_height(table, candidate, style, metrics);
             if (candidate_is_better(candidate, candidate_height, best, best_height)) {
                 best = std::move(candidate);
