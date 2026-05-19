@@ -240,19 +240,16 @@ std::string build_stream_object(
     return out;
 }
 
-std::string build_stream_object(const std::string& payload, const std::string& extra = {})
+// Catches anything with .data() and .size(): std::string, std::vector<uint8_t>,
+// std::array, std::span, etc. The reinterpret_cast is a no-op for unsigned-byte
+// containers and a defined conversion for std::string (char -> unsigned char).
+template <class Container>
+std::string build_stream_object(const Container& payload, const std::string& extra = {})
 {
     return build_stream_object(
         reinterpret_cast<const unsigned char*>(payload.data()),
         payload.size(),
         extra);
-}
-
-std::string build_stream_object(
-    const std::vector<std::uint8_t>&   payload,
-    const std::string&                 extra = {})
-{
-    return build_stream_object(payload.data(), payload.size(), extra);
 }
 
 // Allocates 1-based PDF object IDs on demand and lets callers fill in the
