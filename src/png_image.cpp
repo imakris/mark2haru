@@ -24,18 +24,12 @@ constexpr std::size_t k_max_idat_bytes      = 256u * 1024u * 1024u; // 256 MiB
 
 std::uint32_t read_be32(const std::vector<std::uint8_t>& bytes, std::size_t offset)
 {
-    return
-        (static_cast<std::uint32_t>(bytes[offset    ]) << 24) |
-        (static_cast<std::uint32_t>(bytes[offset + 1]) << 16) |
-        (static_cast<std::uint32_t>(bytes[offset + 2]) << 8)  |
-         static_cast<std::uint32_t>(bytes[offset + 3]);
+    return read_be<std::uint32_t>(&bytes[offset]);
 }
 
 std::uint16_t read_be16(const std::vector<std::uint8_t>& bytes, std::size_t offset)
 {
-    return static_cast<std::uint16_t>(
-        (static_cast<std::uint16_t>(bytes[offset    ]) << 8) |
-         static_cast<std::uint16_t>(bytes[offset + 1])     );
+    return read_be<std::uint16_t>(&bytes[offset]);
 }
 
 // Adds two size_t values and reports overflow. Returns true on success;
