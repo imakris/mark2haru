@@ -2,6 +2,7 @@
 #include <mark2haru/png_image.h>
 
 #include "miniz.h"
+#include "test_common.h"
 
 #include <array>
 #include <cstdint>
@@ -9,7 +10,6 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
-#include <memory>
 #include <string>
 #include <vector>
 
@@ -234,7 +234,7 @@ int main(int argc, char** argv)
         return 2;
     }
 
-    const fs::path exe_dir  = fs::path(argv[0]).parent_path();
+    const fs::path exe_dir  = mark2haru_test::executable_dir(argc, argv);
     const fs::path temp_dir = fs::temp_directory_path() / "mark2haru_png_test";
     fs::create_directories(temp_dir);
 
@@ -270,11 +270,8 @@ int main(int argc, char** argv)
     if (!expect_png(indexed_path, 1, 1, 3, true,  { 0x01, 0x23, 0x45 }, { 17 }))   { return 7; }
     if (!expect_png(rgba16_path,  1, 1, 3, true,  { 0x12, 0x56, 0x9A }, { 0xDE })) { return 8; }
 
-    auto metrics = std::make_shared<mark2haru::Measurement_context>(
-        mark2haru::Font_family_config::briefutil_default(),
-        exe_dir);
-    if (!metrics->loaded()) {
-        std::cerr << metrics->error() << "\n";
+    auto metrics = mark2haru_test::load_default_metrics(exe_dir);
+    if (!metrics) {
         return 9;
     }
 
