@@ -150,11 +150,15 @@ if(MARK2HARU_BUILD_TESTS)
     add_executable(test_markdown
         tests/test_markdown.cpp
     )
+    add_executable(test_table_layout
+        tests/test_table_layout.cpp
+    )
 
     target_link_libraries(test_failure_paths PRIVATE mark2haru_core)
     target_link_libraries(test_pdf_writer PRIVATE mark2haru_core)
     target_link_libraries(test_png PRIVATE mark2haru_core)
     target_link_libraries(test_markdown PRIVATE mark2haru_core)
+    target_link_libraries(test_table_layout PRIVATE mark2haru_core)
     target_include_directories(test_pdf_writer PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/third_party/miniz
     )
@@ -162,17 +166,20 @@ if(MARK2HARU_BUILD_TESTS)
         ${CMAKE_CURRENT_SOURCE_DIR}/third_party/miniz
     )
     mark2haru_copy_bundled_fonts(test_pdf_writer "$<TARGET_FILE_DIR:test_pdf_writer>/fonts")
+    mark2haru_copy_bundled_fonts(test_table_layout "$<TARGET_FILE_DIR:test_table_layout>/fonts")
 
     if(MSVC)
         target_compile_options(test_failure_paths PRIVATE /W4 /permissive-)
         target_compile_options(test_pdf_writer PRIVATE /W4 /permissive-)
         target_compile_options(test_png PRIVATE /W4 /permissive-)
         target_compile_options(test_markdown PRIVATE /W4 /permissive-)
+        target_compile_options(test_table_layout PRIVATE /W4 /permissive-)
     else()
         target_compile_options(test_failure_paths PRIVATE -Wall -Wextra -Wpedantic)
         target_compile_options(test_pdf_writer PRIVATE -Wall -Wextra -Wpedantic)
         target_compile_options(test_png PRIVATE -Wall -Wextra -Wpedantic)
         target_compile_options(test_markdown PRIVATE -Wall -Wextra -Wpedantic)
+        target_compile_options(test_table_layout PRIVATE -Wall -Wextra -Wpedantic)
     endif()
 
     enable_testing()
@@ -226,5 +233,9 @@ if(MARK2HARU_BUILD_TESTS)
     add_test(
         NAME markdown_parse
         COMMAND test_markdown
+    )
+    add_test(
+        NAME table_layout
+        COMMAND test_table_layout
     )
 endif()

@@ -33,9 +33,7 @@ public:
         if (!has(off, 2)) {
             return 0;
         }
-        return static_cast<std::uint16_t>(
-            (static_cast<std::uint16_t>(m_data[off    ]) << 8) |
-             static_cast<std::uint16_t>(m_data[off + 1])     );
+        return read_be<std::uint16_t>(m_data + off);
     }
 
     std::int16_t i16(std::size_t off) const
@@ -48,11 +46,7 @@ public:
         if (!has(off, 4)) {
             return 0;
         }
-        return
-            (static_cast<std::uint32_t>(m_data[off    ]) << 24) |
-            (static_cast<std::uint32_t>(m_data[off + 1]) << 16) |
-            (static_cast<std::uint32_t>(m_data[off + 2]) <<  8) |
-             static_cast<std::uint32_t>(m_data[off + 3]);
+        return read_be<std::uint32_t>(m_data + off);
     }
 
     std::string string_at(std::size_t off, std::size_t len) const

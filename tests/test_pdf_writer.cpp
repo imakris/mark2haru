@@ -1,13 +1,12 @@
-#include <mark2haru/font_context.h>
 #include <mark2haru/pdf_writer.h>
 
 #include "miniz.h"
+#include "test_common.h"
 
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <iterator>
-#include <memory>
 #include <string>
 #include <vector>
 
@@ -86,16 +85,11 @@ bool contains(const std::string& haystack, const std::string& needle)
 
 int main(int argc, char* argv[])
 {
-    const fs::path exe_dir = argc > 0
-        ? fs::absolute(argv[0]).parent_path()
-        : fs::current_path();
+    const fs::path exe_dir  = mark2haru_test::executable_dir(argc, argv);
     const fs::path out_path = exe_dir / "test_pdf_writer.pdf";
 
-    auto metrics = std::make_shared<mark2haru::Measurement_context>(
-        mark2haru::Font_family_config::briefutil_default(),
-        exe_dir);
-    if (!metrics->loaded()) {
-        std::cerr << metrics->error() << "\n";
+    auto metrics = mark2haru_test::load_default_metrics(exe_dir);
+    if (!metrics) {
         return 1;
     }
 

@@ -7,6 +7,7 @@
 #include <iterator>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 namespace mark2haru
@@ -20,6 +21,23 @@ inline bool read_file_bytes(const std::filesystem::path& path, std::vector<std::
     }
     out.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
     return !out.empty();
+}
+
+// Reads `sizeof(T)` big-endian bytes from `p` and returns them as T. T must
+// be an unsigned integer of 1, 2, 4, or 8 bytes. Callers are responsible
+// for bounds-checking `p` before the call.
+template <class T>
+constexpr T read_be(const std::uint8_t* p) noexcept
+{
+    static_assert(std::is_unsigned_v<T>, "read_be<T>: T must be unsigned");
+    static_assert(
+        sizeof(T) == 1 || sizeof(T) == 2 || sizeof(T) == 4 || sizeof(T) == 8,
+        "read_be<T>: only 8/16/32/64-bit widths are supported");
+    T value = 0;
+    for (std::size_t i = 0; i < sizeof(T); ++i) {
+        value = static_cast<T>((value << 8) | static_cast<T>(p[i]));
+    }
+    return value;
 }
 
 // Splits on '\n', stripping a trailing '\r' so CRLF and LF inputs produce
