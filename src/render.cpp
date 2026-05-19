@@ -4,13 +4,12 @@
 #include <mark2haru/png_image.h>
 
 #include "io_helpers.h"
-#include "utf8_decode.h"
+#include "text_layout.h"
 
 #include <algorithm>
 #include <cstdint>
 #include <memory>
 #include <string>
-#include <utility>
 #include <vector>
 
 namespace mark2haru {
@@ -18,171 +17,12 @@ namespace {
 
 namespace fs = std::filesystem;
 
-Pdf_font font_for(Inline_style style)
-{
-    switch (style) {
-        case Inline_style::BOLD:        return Pdf_font::BOLD;
-        case Inline_style::ITALIC:      return Pdf_font::ITALIC;
-        case Inline_style::BOLD_ITALIC: return Pdf_font::BOLD_ITALIC;
-        case Inline_style::CODE:        return Pdf_font::MONO;
-        case Inline_style::NORMAL:
-        default:                        return Pdf_font::REGULAR;
-    }
-}
-
-struct Token
-{
-    std::string    text;
-    Inline_style   style     = Inline_style::NORMAL;
-    bool           newline   = false;
-};
-
-struct Line
-{
-    std::vector<std::pair<std::string, Inline_style>>
-                   spans;
-    double         height_pt = 0.0;
-};
-
-std::vector<Token> tokenize_runs(const std::vector<Inline_run>& runs)
-{
-    std::vector<Token> tokens;
-    for (const auto& run : runs) {
-        size_t start = 0;
-        while (start <= run.text.size()) {
-            const size_t nl = run.text.find('\n', start);
-            const std::string chunk = nl == std::string::npos
-                ? run.text.substr(start)
-                : run.text.substr(start, nl - start);
-
-            size_t piece = 0;
-            while (piece <= chunk.size()) {
-                const size_t sp = chunk.find(' ', piece);
-                if (sp == std::string::npos) {
-                    if (piece < chunk.size()) {
-                        tokens.push_back({ chunk.substr(piece), run.style, false });
-                    }
-                    break;
-                }
-                if (sp > piece) {
-                    tokens.push_back({ chunk.substr(piece, sp - piece), run.style, false });
-                }
-                tokens.push_back({ " ", run.style, false });
-                piece = sp + 1;
-            }
-
-            if (nl == std::string::npos) {
-                break;
-            }
-            tokens.push_back({ "", run.style, true });
-            start = nl + 1;
-        }
-    }
-    return tokens;
-}
-
-template <class MeasureFn>
-std::vector<Line> wrap_tokens(
-    const std::vector<Token>&  tokens,
-    double                     max_width_pt,
-    double                     size_pt,
-    double                     leading,
-    MeasureFn&&                measure)
-{
-    std::vector<Line> lines;
-    Line current;
-    double current_width = 0.0;
-
-    auto finish_line = [&]() {
-        current.height_pt = size_pt * leading;
-        lines.push_back(current);
-        current = Line{};
-        current_width = 0.0;
-    };
-
-    auto add_word = [&](const std::string& word, Inline_style style) {
-        const double word_width = measure(font_for(style), word, size_pt);
-        if (current_width > 0.0 && current_width + word_width > max_width_pt) {
-            finish_line();
-        }
-        if (word_width <= max_width_pt) {
-            current.spans.emplace_back(word, style);
-            current_width += word_width;
-            return;
-        }
-
-        // Word is wider than a full line: break it at code-point boundaries.
-        std::string fragment;
-        double fragment_width = 0.0;
-        for (const auto& piece : utf8::split_pieces(word)) {
-            const double ch_width            = measure(font_for(style), piece, size_pt);
-            const double projected           = current_width + fragment_width + ch_width;
-            const bool   any_content_on_line = current_width > 0.0 || fragment_width > 0.0;
-            if (any_content_on_line && projected > max_width_pt) {
-                if (!fragment.empty()) {
-                    current.spans.emplace_back(fragment, style);
-                    current_width += fragment_width;
-                    fragment.clear();
-                    fragment_width = 0.0;
-                }
-                finish_line();
-            }
-            fragment += piece;
-            fragment_width += ch_width;
-        }
-        if (!fragment.empty()) {
-            current.spans.emplace_back(fragment, style);
-            current_width += fragment_width;
-        }
-    };
-
-    for (const auto& token : tokens) {
-        if (token.newline) {
-            finish_line();
-            continue;
-        }
-        if (token.text == " ") {
-            const double space_width = measure(font_for(token.style), token.text, size_pt);
-            if (!current.spans.empty() && current_width + space_width > max_width_pt) {
-                finish_line();
-            }
-            else
-            if (!current.spans.empty()) {
-                current.spans.emplace_back(token.text, token.style);
-                current_width += space_width;
-            }
-            continue;
-        }
-        if (!token.text.empty()) {
-            add_word(token.text, token.style);
-        }
-    }
-
-    if (!current.spans.empty() || lines.empty()) {
-        finish_line();
-    }
-    return lines;
-}
-
-template <class MeasureFn>
-std::vector<Line> wrap_runs(
-    const std::vector<Inline_run>& runs,
-    double                         max_width_pt,
-    double                         size_pt,
-    double                         leading,
-    MeasureFn&&                    measure)
-{
-    return wrap_tokens(tokenize_runs(runs), max_width_pt, size_pt, leading, measure);
-}
-
-double total_height(const std::vector<Line>& lines)
-{
-    double h = 0.0;
-    for (const auto& line : lines) {
-        h += line.height_pt;
-    }
-    return h;
-}
+using text_layout::font_for;
+using text_layout::Line;
+using text_layout::Token;
+using text_layout::total_height;
+using text_layout::wrap_tokens;
+using text_layout::wrap_runs;
 
 // Standard "overloaded" idiom to combine a set of single-type lambdas
 // into one callable that std::visit can dispatch on. Adding a new block
@@ -239,18 +79,18 @@ std::vector<Line> code_lines(
     const std::string& text,
     double             max_width_pt,
     double             size_pt,
-    double             leading,
+    double             line_height_pt,
     MeasureFn&&        measure)
 {
     std::vector<Line> lines;
     for (const auto& raw : split_lines(text)) {
         std::vector<Token> tokens;
         tokens.push_back({ raw, Inline_style::CODE, false });
-        auto wrapped = wrap_tokens(tokens, max_width_pt, size_pt, leading, measure);
+        auto wrapped = wrap_tokens(tokens, max_width_pt, size_pt, line_height_pt, measure);
         lines.insert(lines.end(), wrapped.begin(), wrapped.end());
     }
     if (lines.empty()) {
-        lines.push_back({ {}, size_pt * leading });
+        lines.push_back({ {}, line_height_pt });
     }
     return lines;
 }
@@ -326,7 +166,7 @@ bool render_markdown_to_pdf(
 
     auto on_paragraph = [&](const Paragraph_block& pb) {
         const auto lines = wrap_runs(pb.runs, content_width, options.body_size_pt,
-            options.line_spacing, measure);
+            options.body_size_pt * options.line_spacing, measure);
         ensure_space(total_height(lines) + options.body_size_pt * 0.25);
         cursor_y = draw_lines_at(lines, options.body_size_pt, options.margin_left_pt, cursor_y);
         cursor_y += options.body_size_pt * 0.35;
@@ -337,7 +177,7 @@ bool render_markdown_to_pdf(
         const double size         = options.body_size_pt * hm.size_factor;
         const double space_before = size * hm.space_before_factor;
         const double space_after  = size * hm.space_after_factor;
-        const auto   lines        = wrap_runs(hb.runs, content_width, size, 1.15, measure);
+        const auto   lines        = wrap_runs(hb.runs, content_width, size, size * 1.15, measure);
         ensure_space(space_before + total_height(lines) + space_after);
         cursor_y += space_before;
         cursor_y = draw_lines_at(lines, size, options.margin_left_pt, cursor_y);
@@ -355,7 +195,7 @@ bool render_markdown_to_pdf(
                 lb.items[i].runs,
                 item_width,
                 options.body_size_pt,
-                options.line_spacing,
+                options.body_size_pt * options.line_spacing,
                 measure);
             ensure_space(total_height(lines) + options.body_size_pt * 0.2);
             writer.draw_text(
@@ -407,7 +247,7 @@ bool render_markdown_to_pdf(
         const double size            = options.body_size_pt * 0.92;
         const double pad             = options.body_size_pt * 0.45;
         const double available_width = content_width - pad * 2.0;
-        const auto   lines           = code_lines(cb.text, available_width, size, 1.25, measure);
+        const auto   lines           = code_lines(cb.text, available_width, size, size * 1.25, measure);
         const double height          = total_height(lines) + pad * 2.0;
         ensure_space(height + options.body_size_pt * 0.2);
         writer.fill_rect(options.margin_left_pt, cursor_y, content_width, height,
@@ -444,7 +284,7 @@ bool render_markdown_to_pdf(
             for (size_t col = 0; col < column_count; ++col) {
                 const std::vector<Inline_run> empty;
                 const auto& runs = col < row.cells.size() ? row.cells[col].runs : empty;
-                cell_lines[r][col] = wrap_runs(runs, inner_width, cell_size, 1.22, measure);
+                cell_lines[r][col] = wrap_runs(runs, inner_width, cell_size, cell_size * 1.22, measure);
                 const double cell_height = total_height(cell_lines[r][col]) + cell_pad * 2.0;
                 row_height = std::max(row_height, cell_height);
             }

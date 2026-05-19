@@ -1,6 +1,6 @@
 #include <mark2haru/table_layout.h>
 
-#include "utf8_decode.h"
+#include "text_layout.h"
 
 #include <algorithm>
 #include <utility>
@@ -9,31 +9,18 @@ namespace mark2haru
 {
 namespace {
 
-Pdf_font font_for(Inline_style style)
+using text_layout::font_for;
+using text_layout::total_height;
+
+// Builds a measurer callable that the wrap engine in text_layout.h can use,
+// bridging the Measurement_context member function into the generic
+// `(font, text, size_pt) -> width_pt` interface.
+auto metrics_measurer(const Measurement_context& metrics)
 {
-    switch (style) {
-        case Inline_style::BOLD:        return Pdf_font::BOLD;
-        case Inline_style::ITALIC:      return Pdf_font::ITALIC;
-        case Inline_style::BOLD_ITALIC: return Pdf_font::BOLD_ITALIC;
-        case Inline_style::CODE:        return Pdf_font::MONO;
-        case Inline_style::NORMAL:
-        default:                        return Pdf_font::REGULAR;
-    }
+    return [&metrics](Pdf_font font, const std::string& text, double size_pt) {
+        return metrics.measure_text_width(font, text, size_pt);
+    };
 }
-
-struct Token
-{
-    std::string    text;
-    Inline_style   style     = Inline_style::NORMAL;
-    bool           newline   = false;
-};
-
-struct Line
-{
-    std::vector<std::pair<std::string, Inline_style>>
-                   spans;
-    double         height_pt = 0.0;
-};
 
 std::vector<Inline_run> table_cell_runs(
     const Table_row&   row,
@@ -61,145 +48,6 @@ std::vector<Inline_run> table_cell_runs(
     return runs;
 }
 
-std::vector<Token> tokenize_runs(const std::vector<Inline_run>& runs)
-{
-    std::vector<Token> tokens;
-    for (const auto& run : runs) {
-        size_t start = 0;
-        while (start <= run.text.size()) {
-            const size_t nl = run.text.find('\n', start);
-            const std::string chunk = nl == std::string::npos
-                ? run.text.substr(start)
-                : run.text.substr(start, nl - start);
-
-            size_t piece = 0;
-            while (piece <= chunk.size()) {
-                const size_t sp = chunk.find(' ', piece);
-                if (sp == std::string::npos) {
-                    if (piece < chunk.size()) {
-                        tokens.push_back({ chunk.substr(piece), run.style, false });
-                    }
-                    break;
-                }
-                if (sp > piece) {
-                    tokens.push_back({ chunk.substr(piece, sp - piece), run.style, false });
-                }
-                tokens.push_back({ " ", run.style, false });
-                piece = sp + 1;
-            }
-
-            if (nl == std::string::npos) {
-                break;
-            }
-            tokens.push_back({ {}, run.style, true });
-            start = nl + 1;
-        }
-    }
-    return tokens;
-}
-
-std::vector<Line> wrap_runs(
-    const std::vector<Inline_run>& runs,
-    double                         max_width_pt,
-    double                         size_pt,
-    double                         leading_pt,
-    const Measurement_context&     metrics)
-{
-    std::vector<Line> lines;
-    Line current;
-    double current_width = 0.0;
-
-    auto append_span = [&](const std::string& text, Inline_style style) {
-        if (text.empty()) {
-            return;
-        }
-        if (!current.spans.empty() && current.spans.back().second == style) {
-            current.spans.back().first += text;
-            return;
-        }
-        current.spans.emplace_back(text, style);
-    };
-
-    auto finish_line = [&]() {
-        current.height_pt = leading_pt;
-        lines.push_back(current);
-        current = Line{};
-        current_width = 0.0;
-    };
-
-    auto add_word = [&](const std::string& word, Inline_style style) {
-        const Pdf_font font       = font_for(style);
-        const double   word_width = metrics.measure_text_width(font, word, size_pt);
-        if (current_width > 0.0 && current_width + word_width > max_width_pt) {
-            finish_line();
-        }
-        if (word_width <= max_width_pt) {
-            append_span(word, style);
-            current_width += word_width;
-            return;
-        }
-
-        std::string fragment;
-        double fragment_width = 0.0;
-        for (const auto& piece : utf8::split_pieces(word)) {
-            const double piece_width = metrics.measure_text_width(font, piece, size_pt);
-            const bool   has_content = current_width > 0.0 || fragment_width > 0.0;
-            if (has_content && current_width + fragment_width + piece_width > max_width_pt) {
-                if (!fragment.empty()) {
-                    append_span(fragment, style);
-                    current_width += fragment_width;
-                    fragment.clear();
-                    fragment_width = 0.0;
-                }
-                finish_line();
-            }
-            fragment += piece;
-            fragment_width += piece_width;
-        }
-        if (!fragment.empty()) {
-            append_span(fragment, style);
-            current_width += fragment_width;
-        }
-    };
-
-    for (const auto& token : tokenize_runs(runs)) {
-        if (token.newline) {
-            finish_line();
-            continue;
-        }
-        if (token.text == " ") {
-            const double space_width =
-                metrics.measure_text_width(font_for(token.style), token.text, size_pt);
-            if (!current.spans.empty() && current_width + space_width > max_width_pt) {
-                finish_line();
-            }
-            else
-            if (!current.spans.empty()) {
-                append_span(token.text, token.style);
-                current_width += space_width;
-            }
-            continue;
-        }
-        if (!token.text.empty()) {
-            add_word(token.text, token.style);
-        }
-    }
-
-    if (!current.spans.empty() || lines.empty()) {
-        finish_line();
-    }
-    return lines;
-}
-
-double lines_height(const std::vector<Line>& lines)
-{
-    double height = 0.0;
-    for (const auto& line : lines) {
-        height += line.height_pt;
-    }
-    return height;
-}
-
 double cell_min_width(
     const std::vector<Inline_run>& runs,
     double                         size_pt,
@@ -208,7 +56,7 @@ double cell_min_width(
     double max_word = 0.0;
     for (const auto& run : runs) {
         const Pdf_font font = font_for(run.style);
-        for (const auto& token : tokenize_runs({ run })) {
+        for (const auto& token : text_layout::tokenize_runs({ run })) {
             if (!token.text.empty() && token.text != " ") {
                 max_word = std::max(
                     max_word,
@@ -250,17 +98,18 @@ double table_row_height(
     double      row_height  = style.text_leading_pt;
     const int   header_rows = table.has_header ? 1 : 0;
     const auto& row         = table.rows[row_index];
+    const auto  measure     = metrics_measurer(metrics);
     for (int col = 0; col < columns.column_count; ++col) {
         const double content_width = columns.widths_pt[col] - 2.0 * style.cell_padding_pt;
         const auto   runs          = table_cell_runs(row, col, row_index < header_rows);
         row_height = std::max(
             row_height,
-            lines_height(wrap_runs(
+            total_height(text_layout::wrap_runs(
                 runs,
                 content_width,
                 style.text_size_pt,
                 style.text_leading_pt,
-                metrics)) + 2.0 * style.cell_padding_pt);
+                measure)) + 2.0 * style.cell_padding_pt);
     }
     return row_height;
 }
@@ -286,7 +135,12 @@ int cell_line_count(
 {
     return
         static_cast<int>(
-            wrap_runs(runs, content_width_pt, style.text_size_pt, style.text_leading_pt, metrics).size()
+            text_layout::wrap_runs(
+                runs,
+                content_width_pt,
+                style.text_size_pt,
+                style.text_leading_pt,
+                metrics_measurer(metrics)).size()
         );
 }
 
@@ -643,18 +497,19 @@ Table_row_layout layout_table_row(
         });
     }
 
-    double      x   = left_pt;
-    const auto& row = table.rows[row_index];
+    double      x       = left_pt;
+    const auto& row     = table.rows[row_index];
+    const auto  measure = metrics_measurer(metrics);
     for (int col = 0; col < columns.column_count; ++col) {
         const double cell_x = x + style.cell_padding_pt;
         double       cell_y = top_pt + style.cell_padding_pt;
         const auto   runs   = table_cell_runs(row, col, is_header);
-        for (const auto& line : wrap_runs(
+        for (const auto& line : text_layout::wrap_runs(
             runs,
             columns.widths_pt[col] - 2.0 * style.cell_padding_pt,
             style.text_size_pt,
             style.text_leading_pt,
-            metrics))
+            measure))
         {
             double text_x = cell_x;
             for (const auto& [text, inline_style] : line.spans) {
