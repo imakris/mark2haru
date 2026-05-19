@@ -59,7 +59,7 @@ jobs:
           cat > build/_consumer/consumer.cpp <<'EOF'
           #include <mark2haru/mark2haru.h>
           int main() {
-              mark2haru::render_options_t options;
+              mark2haru::Render_options options;
               return options.page_width_pt > 0.0 ? 0 : 1;
           }
           EOF
