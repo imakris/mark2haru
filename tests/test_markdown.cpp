@@ -1,4 +1,4 @@
-#include <mark2haru/markdown.h>
+#include "markdown.h"
 
 #include <climits>
 #include <cstdio>

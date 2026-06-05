@@ -1,4 +1,4 @@
-#include <mark2haru/table_layout.h>
+#include "table_layout.h"
 
 #include "test_common.h"
 
@@ -335,6 +335,67 @@ bool expect_inline_span_fonts_and_positions(const Measurement_context& metrics)
     return true;
 }
 
+bool expect_overwide_table_keeps_text_inside_cells(const Measurement_context& metrics)
+{
+    table_style_t style;
+    style.text_size_pt    = 10.0;
+    style.text_leading_pt = 12.0;
+    style.cell_padding_pt =  4.0;
+
+    Table_block table;
+    table.rows = {
+        row({
+            text_cell("Alpha"),
+            text_cell("Beta"),
+            text_cell("Gamma"),
+            text_cell("Delta"),
+            text_cell("Epsilon"),
+        }),
+    };
+
+    constexpr double left_pt            = 30.0;
+    constexpr double top_pt             = 12.0;
+    constexpr double available_width_pt = 18.0;
+    const Table_columns columns = compute_table_columns(
+        table,
+        available_width_pt,
+        style,
+        metrics);
+
+    if (!check(columns.valid, "expected overwide table to produce fallback columns")) {
+        return false;
+    }
+    if (!check(width_sum(columns.widths_pt) <= available_width_pt + k_epsilon_pt,
+            "fallback columns exceeded available width"))
+    {
+        return false;
+    }
+
+    const Table_row_layout layout = layout_table_row(
+        table,
+        0,
+        columns,
+        left_pt,
+        top_pt,
+        style,
+        metrics);
+
+    if (!check(layout.height_pt > 0.0, "expected overwide row to have a positive height")) {
+        return false;
+    }
+
+    const double table_right = left_pt + width_sum(columns.widths_pt);
+    for (const Table_text_span& span : text_spans(layout)) {
+        if (!check(span.x_pt >= left_pt && span.x_pt <= table_right,
+                "overwide table text span escaped table bounds"))
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -357,6 +418,9 @@ int main(int argc, char** argv)
     }
     if (!expect_inline_span_fonts_and_positions(*metrics)) {
         return 6;
+    }
+    if (!expect_overwide_table_keeps_text_inside_cells(*metrics)) {
+        return 7;
     }
 
     return 0;

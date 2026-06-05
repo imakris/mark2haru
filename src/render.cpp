@@ -4,12 +4,15 @@
 #include <mark2haru/png_image.h>
 
 #include "io_helpers.h"
+#include "markdown.h"
+#include "table_layout.h"
 #include "text_layout.h"
 
 #include <algorithm>
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <variant>
 #include <vector>
 
 namespace mark2haru {
@@ -146,8 +149,8 @@ bool render_markdown_to_pdf(
     // Draws a sequence of lines starting at (x, y), advancing y by each
     // line's height. Returns the y after the last line. Used by every
     // block that draws text: paragraph/heading/list pass cursor_y in and
-    // store the result back; code/table pass a local box-relative y in
-    // and ignore the return.
+    // store the result back; code passes a local box-relative y in and
+    // ignores the return.
     auto draw_lines_at = [&](
         const std::vector<Line>& lines,
         double size, double x, double y) -> double
@@ -209,7 +212,12 @@ bool render_markdown_to_pdf(
 
     auto on_image = [&](const Image_content_block& ib) {
         Png_image image;
-        if (!image.load_from_file(fs::path(ib.path)) || image.width_px() <= 0) {
+        fs::path image_path(ib.path);
+        if (image_path.is_relative() && !options.asset_base_dir.empty()) {
+            image_path = options.asset_base_dir / image_path;
+        }
+
+        if (!image.load_from_file(image_path) || image.width_px() <= 0) {
             const std::string placeholder = ib.alt_text.empty()
                 ? ib.path
                 : ib.alt_text;
@@ -258,63 +266,93 @@ bool render_markdown_to_pdf(
         cursor_y += height + options.body_size_pt * 0.25;
     };
 
+    bool render_ok = true;
+
     auto on_table = [&](const Table_block& tb) {
         if (tb.rows.empty()) {
             return;
         }
 
-        size_t column_count = 0;
-        for (const auto& row : tb.rows) {
-            column_count = std::max(column_count, row.cells.size());
-        }
-        if (column_count == 0) {
+        table_style_t style;
+        style.text_size_pt    = options.body_size_pt * 0.95;
+        style.text_leading_pt = style.text_size_pt * 1.22;
+        style.cell_padding_pt = options.body_size_pt * 0.35;
+        style.border_width_pt = border_line_width;
+        style.border_color    = default_stroke;
+        style.header_fill     = table_header_fill;
+
+        const Table_columns columns = compute_table_columns(tb, content_width, style, *metrics);
+        if (!columns.valid) {
+            error = "Unable to lay out table within content width";
+            render_ok = false;
             return;
         }
 
-        const double cell_pad    = options.body_size_pt * 0.35;
-        const double cell_size   = options.body_size_pt * 0.95;
-        const double col_width   = content_width / static_cast<double>(column_count);
-        const double inner_width = col_width - cell_pad * 2.0;
-        std::vector<std::vector<std::vector<Line>>> cell_lines(tb.rows.size());
         std::vector<double> row_heights(tb.rows.size(), 0.0);
-        for (size_t r = 0; r < tb.rows.size(); ++r) {
-            cell_lines[r].resize(column_count);
-            const auto& row        = tb.rows[r];
-            double      row_height = 0.0;
-            for (size_t col = 0; col < column_count; ++col) {
-                const std::vector<Inline_run> empty;
-                const auto& runs = col < row.cells.size() ? row.cells[col].runs : empty;
-                cell_lines[r][col] = wrap_runs(runs, inner_width, cell_size, cell_size * 1.22, measure);
-                const double cell_height = total_height(cell_lines[r][col]) + cell_pad * 2.0;
-                row_height = std::max(row_height, cell_height);
-            }
-            row_heights[r] = row_height;
+        for (std::size_t row_index = 0; row_index < tb.rows.size(); ++row_index) {
+            row_heights[row_index] = layout_table_row(
+                tb,
+                static_cast<int>(row_index),
+                columns,
+                options.margin_left_pt,
+                0.0,
+                style,
+                *metrics).height_pt;
         }
 
-        auto draw_row = [&](size_t row_idx) {
-            const double row_height = row_heights[row_idx];
-            const bool   header     = tb.has_header && row_idx == 0;
-            if (header) {
-                writer.fill_rect(options.margin_left_pt, cursor_y, content_width, row_height,
-                    table_header_fill);
-            }
+        auto draw_table_element = [&](const Table_element& element) {
+            std::visit(
+                Overloaded{
+                    [&](const Table_text_span& span) {
+                        writer.draw_text(
+                            span.x_pt,
+                            span.y_pt,
+                            span.size_pt,
+                            span.font,
+                            span.text,
+                            span.color);
+                    },
+                    [&](const table_line_t& line) {
+                        writer.stroke_line(
+                            line.x1_pt,
+                            line.y1_pt,
+                            line.x2_pt,
+                            line.y2_pt,
+                            line.color,
+                            line.width_pt);
+                    },
+                    [&](const table_fill_rect_t& fill) {
+                        writer.fill_rect(
+                            fill.x_pt,
+                            fill.y_pt,
+                            fill.width_pt,
+                            fill.height_pt,
+                            fill.color);
+                    },
+                },
+                element);
+        };
 
-            double x = options.margin_left_pt;
-            for (size_t col = 0; col < column_count; ++col) {
-                writer.stroke_rect(x, cursor_y, col_width, row_height,
-                    default_stroke, border_line_width);
-                draw_lines_at(cell_lines[row_idx][col], cell_size,
-                    x + cell_pad, cursor_y + cell_pad);
-                x += col_width;
+        auto draw_row = [&](std::size_t row_idx) {
+            const Table_row_layout layout = layout_table_row(
+                tb,
+                static_cast<int>(row_idx),
+                columns,
+                options.margin_left_pt,
+                cursor_y,
+                style,
+                *metrics);
+            for (const Table_element& element : layout.elements) {
+                draw_table_element(element);
             }
-            cursor_y += row_height;
+            cursor_y += layout.height_pt;
         };
 
         const double available =
             options.page_height_pt - options.margin_bottom_pt - options.margin_top_pt;
         const double header_height = tb.has_header ? row_heights[0] : 0.0;
 
-        size_t body_start = tb.has_header ? 1 : 0;
+        const std::size_t body_start = tb.has_header ? 1 : 0;
 
         if (tb.has_header) {
             const double min_fit = header_height
@@ -326,7 +364,7 @@ bool render_markdown_to_pdf(
             ensure_space(row_heights[0]);
         }
 
-        for (size_t row_idx = body_start; row_idx < tb.rows.size(); ++row_idx) {
+        for (std::size_t row_idx = body_start; row_idx < tb.rows.size(); ++row_idx) {
             const double row_height   = row_heights[row_idx];
             const bool   fits_on_page =
                 cursor_y + row_height <= options.page_height_pt - options.margin_bottom_pt;
@@ -381,6 +419,9 @@ bool render_markdown_to_pdf(
                 on_thematic_break,
             },
             block);
+        if (!render_ok) {
+            return false;
+        }
     }
 
     if (!writer.save(output_path)) {

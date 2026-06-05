@@ -18,6 +18,7 @@ compression.
 - bulleted and numbered lists with continuation lines
 - fenced code blocks
 - simple pipe tables that split across pages (headers repeat)
+- standalone PNG image blocks (`![alt](path.png)`)
 - inline `**bold**`, `*italic*`, `***bold italic***`, and `` `code` ``
 - links rendered as `text (url)` so the destination is not lost
 - thematic breaks (`---`, `***`, `___`, also spaced forms like `- - -`)
@@ -25,7 +26,7 @@ compression.
 
 ## What it does not try to do
 
-- Markdown image syntax
+- inline images inside paragraph text
 - full CommonMark compatibility
 - font subsetting (see below)
 
@@ -130,8 +131,9 @@ if (!mark2haru::render_markdown_to_pdf(markdown, output_path, options, error)) {
 }
 ```
 
-`Render_options` lets you control page geometry, body text sizing, line spacing, and the font
-root directory used during font resolution.
+`Render_options` lets you control page geometry, body text sizing, line spacing, the asset
+base directory used for relative image paths, and the font root directory used during font
+resolution.
 
 ## Example
 
@@ -145,9 +147,9 @@ It also includes Greek and Cyrillic to exercise Unicode text beyond Windows-1252
 
 - The output is intended for short-to-medium briefs rather than long books.
 - The layout engine uses simple greedy wrapping and basic pagination.
-- Tables use equal-width columns. Long tables split across pages and repeat the header row.
-- Markdown image syntax is not implemented, even though the lower-level PDF writer can place PNG
-  images when used directly.
+- Tables use content-aware column widths. Long tables split across pages and repeat the header row.
+- Standalone Markdown image blocks render PNGs. Relative image paths resolve against
+  `Render_options::asset_base_dir`; the CLI sets that directory from the input Markdown file.
 - Font coverage is defined by the bundled DejaVu family. Code points with no glyph in the
   selected face fall back to `?` if the font has it, otherwise to the font's `.notdef` glyph.
 - Stream compression is size-aware rather than forced; very small objects may remain uncompressed

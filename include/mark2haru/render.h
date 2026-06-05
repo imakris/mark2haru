@@ -1,7 +1,6 @@
 #pragma once
 
 #include <mark2haru/font_context.h>
-#include <mark2haru/markdown.h>
 
 #include <filesystem>
 #include <string>
@@ -19,6 +18,7 @@ struct Render_options
     double                 margin_bottom_pt = 56.7;
     double                 body_size_pt     = 10.5;
     double                 line_spacing     = 1.35;
+    std::filesystem::path  asset_base_dir;
     std::filesystem::path  font_root_dir;
     Font_family_config     font_family;
 };

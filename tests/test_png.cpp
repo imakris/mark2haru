@@ -1,5 +1,6 @@
 #include <mark2haru/pdf_writer.h>
 #include <mark2haru/png_image.h>
+#include <mark2haru/render.h>
 
 #include "miniz.h"
 #include "test_common.h"
@@ -35,7 +36,14 @@ void write_chunk(std::ofstream& out, const char type[4], const std::vector<std::
     if (!data.empty()) {
         out.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
     }
-    write_u32_be(out, 0);
+    mz_ulong crc = mz_crc32(
+        MZ_CRC32_INIT,
+        reinterpret_cast<const unsigned char*>(type),
+        4);
+    if (!data.empty()) {
+        crc = mz_crc32(crc, data.data(), data.size());
+    }
+    write_u32_be(out, static_cast<std::uint32_t>(crc));
 }
 
 bool compress_bytes(const std::vector<std::uint8_t>& raw, std::vector<std::uint8_t>& compressed)
@@ -118,9 +126,18 @@ bool starts_with_pdf_header(const fs::path& path)
         header[3]   == 'F';
 }
 
+bool file_contains(const fs::path& path, const std::string& needle)
+{
+    std::ifstream in(path, std::ios::binary);
+    const std::string body{
+        std::istreambuf_iterator<char>(in),
+        std::istreambuf_iterator<char>()};
+    return body.find(needle) != std::string::npos;
+}
+
 // Writes a deliberately-corrupt PNG by emitting the signature plus a list of
-// raw chunk bodies, with no validation of chunk types or order. Used to feed
-// the decoder cases it's expected to reject.
+// raw chunk bodies, with no semantic validation of chunk types or order. Used
+// to feed the decoder cases it's expected to reject.
 bool write_raw_png(
     const fs::path&        path,
     const std::vector<std::pair<std::array<char, 4>, std::vector<std::uint8_t>>>&
@@ -138,7 +155,14 @@ bool write_raw_png(
         if (!body.empty()) {
             out.write(reinterpret_cast<const char*>(body.data()), static_cast<std::streamsize>(body.size()));
         }
-        write_u32_be(out, 0); // bogus CRC; decoder does not verify CRCs
+        mz_ulong crc = mz_crc32(
+            MZ_CRC32_INIT,
+            reinterpret_cast<const unsigned char*>(type.data()),
+            type.size());
+        if (!body.empty()) {
+            crc = mz_crc32(crc, body.data(), body.size());
+        }
+        write_u32_be(out, static_cast<std::uint32_t>(crc));
     }
     return static_cast<bool>(out);
 }
@@ -165,6 +189,46 @@ std::vector<std::uint8_t> ihdr_body(
     body.push_back(0);
     body.push_back(0);
     return body;
+}
+
+bool write_bad_crc_png(const fs::path& path)
+{
+    std::ofstream out(path, std::ios::binary);
+    if (!out) {
+        return false;
+    }
+
+    static constexpr std::array<std::uint8_t, 8> signature = {
+        0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A
+    };
+    const std::vector<std::uint8_t> ihdr = ihdr_body(1, 1, 8, 0);
+    out.write(reinterpret_cast<const char*>(signature.data()), 8);
+    write_u32_be(out, static_cast<std::uint32_t>(ihdr.size()));
+    out.write("IHDR", 4);
+    out.write(reinterpret_cast<const char*>(ihdr.data()), static_cast<std::streamsize>(ihdr.size()));
+    write_u32_be(out, 0);
+    return static_cast<bool>(out);
+}
+
+bool write_missing_iend_png(const fs::path& path)
+{
+    std::vector<std::uint8_t> compressed;
+    if (!compress_bytes({ 0x00, 0x80 }, compressed)) {
+        return false;
+    }
+
+    std::ofstream out(path, std::ios::binary);
+    if (!out) {
+        return false;
+    }
+
+    static constexpr std::array<std::uint8_t, 8> signature = {
+        0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A
+    };
+    out.write(reinterpret_cast<const char*>(signature.data()), 8);
+    write_chunk(out, "IHDR", ihdr_body(1, 1, 8, 0));
+    write_chunk(out, "IDAT", compressed);
+    return static_cast<bool>(out);
 }
 
 bool expect_png_load_failure(const fs::path& path, const char* label)
@@ -242,6 +306,7 @@ int main(int argc, char** argv)
     const auto indexed_path = temp_dir / "indexed.png";
     const auto rgba16_path  = temp_dir / "rgba16.png";
     const auto pdf_path     = temp_dir / "mark2haru_png_test.pdf";
+    const auto render_path  = temp_dir / "mark2haru_asset_base.pdf";
 
     if (!write_png(gray1_path, 1, 1, 1, 0, { 0x00, 0x80 })) {
         std::cerr << "failed to write gray1 png\n";
@@ -302,9 +367,51 @@ int main(int argc, char** argv)
         return 14;
     }
 
+    const fs::path asset_dir = temp_dir / "assets";
+    fs::create_directories(asset_dir / "images");
+    if (!write_png(asset_dir / "images" / "inline.png", 1, 1, 1, 0, { 0x00, 0x80 })) {
+        std::cerr << "failed to write asset-base png\n";
+        return 15;
+    }
+
+    mark2haru::Render_options options;
+    options.asset_base_dir = asset_dir;
+    options.font_root_dir  = exe_dir;
+
+    std::string error;
+    if (!mark2haru::render_markdown_to_pdf(
+            "![Alt](images/inline.png)\n",
+            render_path,
+            options,
+            error))
+    {
+        std::cerr << "render with asset-base image failed: " << error << "\n";
+        return 16;
+    }
+    if (!file_contains(render_path, "/Subtype /Image")) {
+        std::cerr << "rendered PDF did not embed asset-base image\n";
+        return 17;
+    }
+
     // Negative cases for the hardened decoder: each of these used to be
     // either accepted silently or could trigger out-of-bounds arithmetic
     // before the decoder was tightened up.
+    {
+        const fs::path path = temp_dir / "bad_crc.png";
+        if (!write_bad_crc_png(path) ||
+            !expect_png_load_failure(path, "bad CRC"))
+        {
+            return 18;
+        }
+    }
+    {
+        const fs::path path = temp_dir / "missing_iend.png";
+        if (!write_missing_iend_png(path) ||
+            !expect_png_load_failure(path, "missing IEND"))
+        {
+            return 19;
+        }
+    }
     {
         // Chunk before IHDR: spec violation.
         const fs::path path = temp_dir / "before_ihdr.png";
@@ -316,7 +423,7 @@ int main(int argc, char** argv)
         if (!write_raw_png(path, chunks) ||
             !expect_png_load_failure(path, "chunk before IHDR"))
         {
-            return 15;
+            return 20;
         }
     }
     {
@@ -330,7 +437,7 @@ int main(int argc, char** argv)
         if (!write_raw_png(path, chunks) ||
             !expect_png_load_failure(path, "duplicate IHDR"))
         {
-            return 16;
+            return 21;
         }
     }
     {
@@ -343,7 +450,7 @@ int main(int argc, char** argv)
         if (!write_raw_png(path, chunks) ||
             !expect_png_load_failure(path, "oversize dimensions"))
         {
-            return 17;
+            return 22;
         }
     }
     {
@@ -358,7 +465,7 @@ int main(int argc, char** argv)
         raw.close();
         if (!expect_png_load_failure(path, "truncated chunk"))
         {
-            return 18;
+            return 23;
         }
     }
 

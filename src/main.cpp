@@ -1,9 +1,9 @@
 #include <mark2haru/render.h>
 
+#include "io_helpers.h"
+
 #include <filesystem>
-#include <fstream>
 #include <iostream>
-#include <sstream>
 #include <string>
 
 namespace {
@@ -15,30 +15,19 @@ void print_usage()
     std::cerr << "Usage: mark2haru <input.md> <output.pdf>\n";
 }
 
-bool read_file(const fs::path& path, std::string& out)
-{
-    std::ifstream in(path, std::ios::binary);
-    if (!in) {
-        return false;
-    }
-    std::ostringstream ss;
-    ss << in.rdbuf();
-    out = ss.str();
-    return true;
-}
-
 int run(
     const fs::path&    exe_path,
     const fs::path&    input_path,
     const fs::path&    output_path)
 {
     std::string markdown;
-    if (!read_file(input_path, markdown)) {
+    if (!mark2haru::read_file_string(input_path, markdown)) {
         std::cerr << "Failed to read input file: " << input_path.string() << "\n";
         return 2;
     }
 
     mark2haru::Render_options options;
+    options.asset_base_dir = fs::absolute(input_path).parent_path();
     options.font_root_dir = exe_path.parent_path();
 
     std::string error;

@@ -26,7 +26,7 @@ inline std::shared_ptr<mark2haru::Measurement_context> load_default_metrics(
     const std::filesystem::path& exe_dir)
 {
     auto metrics = std::make_shared<mark2haru::Measurement_context>(
-        mark2haru::Font_family_config::briefutil_default(),
+        mark2haru::Font_family_config::bundled_default(),
         exe_dir);
     if (!metrics->loaded()) {
         std::fprintf(stderr, "font load failed: %s\n", metrics->error().c_str());

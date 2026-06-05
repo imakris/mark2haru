@@ -115,7 +115,8 @@ private:
     std::vector<Page>          m_pages;
     std::shared_ptr<const Measurement_context>
                                m_metrics;
-    std::array<Loaded_font, 5> m_fonts{};
+    std::array<Loaded_font, pdf_font_count>
+                               m_fonts{};
     std::vector<Loaded_image>  m_images;
     bool                       m_fonts_loaded   = false;
     std::string                m_font_error;
@@ -139,7 +140,7 @@ private:
         const Loaded_font&     font);
 
     static std::vector<Pdf_font> used_fonts(
-        const std::array<Loaded_font, 5>&  fonts);
+        const std::array<Loaded_font, pdf_font_count>&  fonts);
 };
 
 } // namespace mark2haru

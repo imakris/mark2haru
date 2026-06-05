@@ -1,8 +1,9 @@
-#include <mark2haru/table_layout.h>
+#include "table_layout.h"
 
 #include "text_layout.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <utility>
 
 namespace mark2haru
@@ -73,14 +74,11 @@ double cell_min_width(
     const Measurement_context&     metrics)
 {
     double max_word = 0.0;
-    for (const auto& run : runs) {
-        const Pdf_font font = font_for(run.style);
-        for (const auto& token : text_layout::tokenize_runs({ run })) {
-            if (!token.text.empty() && token.text != " ") {
-                max_word = std::max(
-                    max_word,
-                    metrics.measure_text_width(font, token.text, size_pt));
-            }
+    for (const auto& token : text_layout::tokenize_runs(runs)) {
+        if (!token.text.empty() && token.text != " ") {
+            max_word = std::max(
+                max_word,
+                metrics.measure_text_width(font_for(token.style), token.text, size_pt));
         }
     }
     return max_word;
@@ -107,6 +105,14 @@ double width_sum(const std::vector<double>& widths_pt)
     return total;
 }
 
+double cell_padding_for_width(double width_pt, const table_style_t& style)
+{
+    if (width_pt <= 0.0) {
+        return 0.0;
+    }
+    return std::min(style.cell_padding_pt, width_pt * 0.25);
+}
+
 double table_row_height(
     const Table_block&         table,
     int                        row_index,
@@ -119,7 +125,8 @@ double table_row_height(
     const auto& row         = table.rows[row_index];
     const auto  measure     = metrics_measurer(metrics);
     for (int col = 0; col < columns.column_count; ++col) {
-        const double content_width = columns.widths_pt[col] - 2.0 * style.cell_padding_pt;
+        const double cell_padding  = cell_padding_for_width(columns.widths_pt[col], style);
+        const double content_width = columns.widths_pt[col] - 2.0 * cell_padding;
         const auto   runs          = table_cell_runs(row, col, row_index < header_rows);
         row_height = std::max(
             row_height,
@@ -128,7 +135,7 @@ double table_row_height(
                 content_width,
                 style.text_size_pt,
                 style.text_leading_pt,
-                measure)) + 2.0 * style.cell_padding_pt);
+                measure)) + 2.0 * cell_padding);
     }
     return row_height;
 }
@@ -233,6 +240,23 @@ std::vector<double> waterfill_widths(
     std::vector<double> result(n, 0.0);
     for (size_t i = 0; i < n; ++i) {
         result[i] = min_widths[i] + std::min(rooms[i], level);
+    }
+    return result;
+}
+
+std::vector<double> shrink_widths_to_fit(
+    const std::vector<double>& widths_pt,
+    double                     available_width_pt)
+{
+    std::vector<double> result(widths_pt.size(), 0.0);
+    const double        total = width_sum(widths_pt);
+    if (widths_pt.empty() || available_width_pt <= 0.0 || total <= 0.0) {
+        return result;
+    }
+
+    const double scale = available_width_pt / total;
+    for (std::size_t i = 0; i < widths_pt.size(); ++i) {
+        result[i] = widths_pt[i] * scale;
     }
     return result;
 }
@@ -454,11 +478,16 @@ Table_columns compute_table_columns(
         }
     }
 
-    if (width_sum(min_widths) > available_width_pt) {
+    if (available_width_pt <= 0.0) {
         return columns;
     }
 
     columns.valid = true;
+    if (width_sum(min_widths) > available_width_pt) {
+        columns.widths_pt = shrink_widths_to_fit(min_widths, available_width_pt);
+        return columns;
+    }
+
     columns.widths_pt = waterfill_widths(min_widths, pref_widths, available_width_pt);
 
     return optimize_columns(
@@ -496,12 +525,14 @@ Table_row_layout layout_table_row(
     const auto& row     = table.rows[row_index];
     const auto  measure = metrics_measurer(metrics);
     for (int col = 0; col < columns.column_count; ++col) {
-        const double cell_x = x + style.cell_padding_pt;
-        double       cell_y = top_pt + style.cell_padding_pt;
-        const auto   runs   = table_cell_runs(row, col, is_header);
+        const double cell_padding  = cell_padding_for_width(columns.widths_pt[col], style);
+        const double content_width = columns.widths_pt[col] - 2.0 * cell_padding;
+        const double cell_x        = x + cell_padding;
+        double       cell_y        = top_pt + cell_padding;
+        const auto   runs          = table_cell_runs(row, col, is_header);
         for (const auto& line : text_layout::wrap_runs(
             runs,
-            columns.widths_pt[col] - 2.0 * style.cell_padding_pt,
+            content_width,
             style.text_size_pt,
             style.text_leading_pt,
             measure))

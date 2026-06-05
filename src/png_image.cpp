@@ -158,6 +158,7 @@ bool Png_image::decode_png(const std::vector<std::uint8_t>& file_bytes)
     std::vector<std::uint8_t> palette;
     std::vector<std::uint8_t> palette_alpha;
     bool          seen_ihdr         = false;
+    bool          seen_iend         = false;
     std::uint8_t  bit_depth         = 0;
     std::uint8_t  color_type        = 0;
     std::uint16_t transparency_gray = 0;
@@ -184,6 +185,16 @@ bool Png_image::decode_png(const std::vector<std::uint8_t>& file_bytes)
         }
 
         const std::uint8_t* chunk_data = &file_bytes[pos];
+        const std::uint32_t stored_crc = read_be32(file_bytes, pos + chunk_len);
+        const mz_ulong computed_crc = mz_crc32(
+            MZ_CRC32_INIT,
+            reinterpret_cast<const unsigned char*>(&file_bytes[pos - 4]),
+            chunk_len + 4);
+        if (static_cast<std::uint32_t>(computed_crc) != stored_crc) {
+            m_error = "PNG chunk CRC mismatch";
+            return false;
+        }
+
         if (chunk_type == "IHDR") {
             if (seen_ihdr) {
                 m_error = "Duplicate PNG header";
@@ -263,6 +274,7 @@ bool Png_image::decode_png(const std::vector<std::uint8_t>& file_bytes)
         }
         else
         if (chunk_type == "IEND") {
+            seen_iend = true;
             break;
         }
 
@@ -271,6 +283,10 @@ bool Png_image::decode_png(const std::vector<std::uint8_t>& file_bytes)
 
     if (!seen_ihdr || m_width_px <= 0 || m_height_px <= 0) {
         m_error = "Missing PNG header";
+        return false;
+    }
+    if (!seen_iend) {
+        m_error = "Missing PNG end chunk";
         return false;
     }
     if (color_type == 3 && palette.empty()) {
@@ -430,7 +446,11 @@ bool Png_image::decode_png(const std::vector<std::uint8_t>& file_bytes)
                 m_pixels[dst + 1] = sample_to_u8(g, bit_depth);
                 m_pixels[dst + 2] = sample_to_u8(b, bit_depth);
                 if (has_rgb_key) {
-                    write_alpha(x, (r == transparency_rgb[0] && g == transparency_rgb[1] && b == transparency_rgb[2]) ? 0 : 255);
+                    const bool transparent =
+                        r == transparency_rgb[0] &&
+                        g == transparency_rgb[1] &&
+                        b == transparency_rgb[2];
+                    write_alpha(x, transparent ? 0 : 255);
                 }
             }
         }

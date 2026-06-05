@@ -20,7 +20,21 @@ inline bool read_file_bytes(const std::filesystem::path& path, std::vector<std::
         return false;
     }
     out.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
-    return !out.empty();
+    return true;
+}
+
+inline bool read_file_string(const std::filesystem::path& path, std::string& out)
+{
+    std::vector<std::uint8_t> bytes;
+    if (!read_file_bytes(path, bytes)) {
+        return false;
+    }
+    if (bytes.empty()) {
+        out.clear();
+        return true;
+    }
+    out.assign(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+    return true;
 }
 
 // Reads `sizeof(T)` big-endian bytes from `p` and returns them as T. T must

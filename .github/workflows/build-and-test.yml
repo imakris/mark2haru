@@ -58,9 +58,19 @@ jobs:
           EOF
           cat > build/_consumer/consumer.cpp <<'EOF'
           #include <mark2haru/mark2haru.h>
+          #include <filesystem>
+          #include <memory>
           int main() {
               mark2haru::Render_options options;
-              return options.page_width_pt > 0.0 ? 0 : 1;
+              options.font_root_dir = std::filesystem::path("build/_install/share/mark2haru");
+              auto metrics = std::make_shared<mark2haru::Measurement_context>(
+                  options.font_family,
+                  options.font_root_dir);
+              if (!metrics->loaded()) {
+                  return 1;
+              }
+              mark2haru::Pdf_writer writer(100.0, 100.0, metrics);
+              return writer.fonts_loaded() ? 0 : 2;
           }
           EOF
           cmake -S build/_consumer -B build/_consumer/_build \

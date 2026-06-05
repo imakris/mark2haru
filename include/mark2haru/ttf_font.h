@@ -32,6 +32,12 @@ public:
     double        italic_angle()   const { return m_italic_angle;   }
     bool          is_fixed_pitch() const { return m_is_fixed_pitch; }
 
+    /**
+     * @brief Return the glyph id for a Unicode code point.
+     *
+     * This updates an internal lookup cache. Concurrent access to the same
+     * True_type_font instance requires external synchronization.
+     */
     std::uint16_t glyph_for_codepoint(std::uint32_t codepoint) const;
     std::uint16_t advance_width_for_gid(std::uint16_t gid) const;
 

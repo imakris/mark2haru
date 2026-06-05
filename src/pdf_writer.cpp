@@ -1,5 +1,6 @@
 #include <mark2haru/pdf_writer.h>
 
+#include "pdf_font_descriptors.h"
 #include "utf8_decode.h"
 
 #include "miniz.h"
@@ -170,17 +171,11 @@ void Pdf_writer::append_color(std::string& out, const color_t& color, bool strok
 
 std::string Pdf_writer::font_resource_name(Pdf_font font)
 {
-    switch (font) {
-        case Pdf_font::REGULAR:     return "/F1";
-        case Pdf_font::BOLD:        return "/F2";
-        case Pdf_font::ITALIC:      return "/F3";
-        case Pdf_font::BOLD_ITALIC: return "/F4";
-        case Pdf_font::MONO:        return "/F5";
-        default:                    return "/F1";
-    }
+    return pdf_font_descriptor(font).resource_name;
 }
 
-std::vector<Pdf_font> Pdf_writer::used_fonts(const std::array<Loaded_font, 5>& fonts)
+std::vector<Pdf_font> Pdf_writer::used_fonts(
+    const std::array<Loaded_font, pdf_font_count>& fonts)
 {
     std::vector<Pdf_font> out;
     for (std::size_t i = 0; i < fonts.size(); ++i) {
@@ -370,7 +365,7 @@ void Pdf_writer::draw_text(
         return;
     }
 
-    auto&             slot    = m_fonts[static_cast<std::size_t>(font)];
+    auto&             slot    = m_fonts[pdf_font_index(font)];
     const auto&       face    = m_metrics->font_face(font);
     const std::string encoded = utf8_to_hex_cid_string(face, slot, text);
     auto&             out     = current_content();
