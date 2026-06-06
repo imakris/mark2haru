@@ -47,7 +47,6 @@ struct List_block
 
 struct Code_block
 {
-    std::string                language;
     std::string                text;
 };
 

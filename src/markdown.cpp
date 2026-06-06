@@ -448,7 +448,6 @@ std::vector<Block> parse_markdown(const std::string& input)
         if (trimmed.rfind("```", 0) == 0) {
             flush_paragraph();
             Code_block code;
-            code.language = trim(trimmed.substr(3));
             ++i;
             while (i < lines.size()) {
                 const std::string inner = trim(lines[i]);

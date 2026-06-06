@@ -1,5 +1,6 @@
 #include <mark2haru/render.h>
 
+#include <mark2haru/font_context.h>
 #include <mark2haru/pdf_writer.h>
 #include <mark2haru/png_image.h>
 
@@ -290,14 +291,12 @@ bool render_markdown_to_pdf(
 
         std::vector<double> row_heights(tb.rows.size(), 0.0);
         for (std::size_t row_index = 0; row_index < tb.rows.size(); ++row_index) {
-            row_heights[row_index] = layout_table_row(
+            row_heights[row_index] = measure_table_row_height(
                 tb,
                 static_cast<int>(row_index),
                 columns,
-                options.margin_left_pt,
-                0.0,
                 style,
-                *metrics).height_pt;
+                *metrics);
         }
 
         auto draw_table_element = [&](const Table_element& element) {

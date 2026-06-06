@@ -27,6 +27,7 @@ compression.
 ## What it does not try to do
 
 - inline images inside paragraph text
+- table column alignment from `:---`, `---:`, or `:---:` separator markers
 - full CommonMark compatibility
 - font subsetting (see below)
 
@@ -135,6 +136,10 @@ if (!mark2haru::render_markdown_to_pdf(markdown, output_path, options, error)) {
 base directory used for relative image paths, and the font root directory used during font
 resolution.
 
+Installed CMake packages export `mark2haru_FONT_ROOT`, which points at the installed
+`share/mark2haru` data directory. Pass that value to `Render_options::font_root_dir` when
+using the bundled installed fonts from a CMake consumer.
+
 ## Example
 
 `examples/neutral_brief.md` shows a neutral EBICS-style brief with headings, paragraphs,
@@ -163,7 +168,7 @@ information is available at <https://varinomics.com/>.
 
 ## Attribution
 
-- Bundled DejaVu fonts are distributed under the DejaVu / Bitstream Vera license. See the
-  upstream project at <https://dejavu-fonts.github.io/> for full terms.
-- `third_party/miniz` is vendored from <https://github.com/richgel999/miniz> (MIT/zlib-style
-  license).
+- Bundled DejaVu fonts are distributed under the DejaVu / Bitstream Vera license. See
+  `fonts/LICENSE.DejaVu` for the local license text.
+- `third_party/miniz` is vendored from <https://github.com/richgel999/miniz>. See
+  `third_party/miniz/LICENSE` for the local license notices.

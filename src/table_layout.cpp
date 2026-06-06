@@ -494,6 +494,19 @@ Table_columns compute_table_columns(
         table, std::move(columns), min_widths, available_width_pt, style, metrics);
 }
 
+double measure_table_row_height(
+    const Table_block&         table,
+    int                        row_index,
+    const Table_columns&       columns,
+    const table_style_t&       style,
+    const Measurement_context& metrics)
+{
+    if (!columns.valid || row_index < 0 || row_index >= static_cast<int>(table.rows.size())) {
+        return 0.0;
+    }
+    return table_row_height(table, row_index, columns, style, metrics);
+}
+
 Table_row_layout layout_table_row(
     const Table_block&         table,
     int                        row_index,

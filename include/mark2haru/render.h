@@ -1,6 +1,6 @@
 #pragma once
 
-#include <mark2haru/font_context.h>
+#include <mark2haru/font_config.h>
 
 #include <filesystem>
 #include <string>

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <mark2haru/font_config.h>
 #include <mark2haru/ttf_font.h>
 
 #include <array>
@@ -21,34 +22,6 @@ enum class Pdf_font
 };
 
 inline constexpr std::size_t pdf_font_count = static_cast<std::size_t>(Pdf_font::COUNT);
-
-struct Font_source
-{
-    std::filesystem::path  path;
-
-    static Font_source from_path(const std::filesystem::path& path)
-    {
-        Font_source out;
-        out.path = path;
-        return out;
-    }
-
-    bool empty() const
-    {
-        return path.empty();
-    }
-};
-
-struct Font_family_config
-{
-    Font_source    regular;
-    Font_source    bold;
-    Font_source    italic;
-    Font_source    bold_italic;
-    Font_source    mono;
-
-    static Font_family_config bundled_default();
-};
 
 class Measurement_context
 {

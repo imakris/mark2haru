@@ -231,7 +231,10 @@ bool write_missing_iend_png(const fs::path& path)
     return static_cast<bool>(out);
 }
 
-bool expect_png_load_failure(const fs::path& path, const char* label)
+bool expect_png_load_failure(
+    const fs::path& path,
+    const char*     label,
+    const char*     expected_error = nullptr)
 {
     mark2haru::Png_image image;
     if (image.load_from_file(path)) {
@@ -244,6 +247,12 @@ bool expect_png_load_failure(const fs::path& path, const char* label)
     }
     if (image.error().empty()) {
         std::cerr << "no error message for " << label << "\n";
+        return false;
+    }
+    if (expected_error != nullptr &&
+        image.error().find(expected_error) == std::string::npos)
+    {
+        std::cerr << "unexpected error for " << label << ": " << image.error() << "\n";
         return false;
     }
     return true;
@@ -413,6 +422,49 @@ int main(int argc, char** argv)
         }
     }
     {
+        const fs::path path = temp_dir / "short_image_data.png";
+        std::vector<std::uint8_t> compressed;
+        if (!compress_bytes({ 0x00 }, compressed)) {
+            std::cerr << "failed to compress short image data\n";
+            return 20;
+        }
+        std::vector<std::pair<std::array<char, 4>, std::vector<std::uint8_t>>> chunks = {
+            { {'I','H','D','R'}, ihdr_body(1, 1, 8, 0) },
+            { {'I','D','A','T'}, compressed },
+            { {'I','E','N','D'}, {} },
+        };
+        if (!write_raw_png(path, chunks) ||
+            !expect_png_load_failure(
+                path,
+                "short image data",
+                "PNG image data size mismatch"))
+        {
+            return 21;
+        }
+    }
+    {
+        const fs::path path = temp_dir / "trailing_image_data.png";
+        std::vector<std::uint8_t> compressed;
+        if (!compress_bytes({ 0x00, 0x80 }, compressed)) {
+            std::cerr << "failed to compress trailing image data\n";
+            return 22;
+        }
+        compressed.push_back(0x00);
+        std::vector<std::pair<std::array<char, 4>, std::vector<std::uint8_t>>> chunks = {
+            { {'I','H','D','R'}, ihdr_body(1, 1, 8, 0) },
+            { {'I','D','A','T'}, compressed },
+            { {'I','E','N','D'}, {} },
+        };
+        if (!write_raw_png(path, chunks) ||
+            !expect_png_load_failure(
+                path,
+                "trailing image data",
+                "PNG image data size mismatch"))
+        {
+            return 23;
+        }
+    }
+    {
         // Chunk before IHDR: spec violation.
         const fs::path path = temp_dir / "before_ihdr.png";
         std::vector<std::pair<std::array<char, 4>, std::vector<std::uint8_t>>> chunks = {
@@ -423,7 +475,7 @@ int main(int argc, char** argv)
         if (!write_raw_png(path, chunks) ||
             !expect_png_load_failure(path, "chunk before IHDR"))
         {
-            return 20;
+            return 24;
         }
     }
     {
@@ -437,7 +489,7 @@ int main(int argc, char** argv)
         if (!write_raw_png(path, chunks) ||
             !expect_png_load_failure(path, "duplicate IHDR"))
         {
-            return 21;
+            return 25;
         }
     }
     {
@@ -450,7 +502,7 @@ int main(int argc, char** argv)
         if (!write_raw_png(path, chunks) ||
             !expect_png_load_failure(path, "oversize dimensions"))
         {
-            return 22;
+            return 26;
         }
     }
     {
@@ -465,7 +517,7 @@ int main(int argc, char** argv)
         raw.close();
         if (!expect_png_load_failure(path, "truncated chunk"))
         {
-            return 23;
+            return 27;
         }
     }
 

@@ -328,9 +328,11 @@ bool Png_image::decode_png(const std::vector<std::uint8_t>& file_bytes)
         return false;
     }
 
+    const mz_ulong expected_decoded_len = static_cast<mz_ulong>(decoded_size);
+    const mz_ulong expected_idat_len    = static_cast<mz_ulong>(idat.size());
     std::vector<std::uint8_t> decoded(decoded_size);
-    mz_ulong decoded_len = static_cast<mz_ulong>(decoded.size());
-    mz_ulong idat_len    = static_cast<mz_ulong>(idat.size());
+    mz_ulong decoded_len = expected_decoded_len;
+    mz_ulong idat_len    = expected_idat_len;
     if (mz_uncompress2(
             reinterpret_cast<unsigned char*>(decoded.data()),
             &decoded_len,
@@ -338,6 +340,10 @@ bool Png_image::decode_png(const std::vector<std::uint8_t>& file_bytes)
             &idat_len) != Z_OK)
     {
         m_error = "Failed to decompress PNG image data";
+        return false;
+    }
+    if (decoded_len != expected_decoded_len || idat_len != expected_idat_len) {
+        m_error = "PNG image data size mismatch";
         return false;
     }
     decoded.resize(static_cast<std::size_t>(decoded_len));

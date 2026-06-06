@@ -1,7 +1,10 @@
 #include "markdown.h"
+#include "utf8_decode.h"
 
 #include <climits>
 #include <cstdio>
+#include <cstdint>
+#include <initializer_list>
 #include <string>
 #include <vector>
 
@@ -47,6 +50,53 @@ bool expect_text_equals(const std::vector<Inline_run>& runs, const std::string& 
             "text mismatch:\nexpected: %s\nactual:   %s\n",
             expected.c_str(), actual.c_str());
         return false;
+    }
+    return true;
+}
+
+std::string byte_string(std::initializer_list<unsigned int> values)
+{
+    std::string out;
+    out.reserve(values.size());
+    for (const unsigned int value : values) {
+        out.push_back(static_cast<char>(value));
+    }
+    return out;
+}
+
+bool expect_codepoints(
+    const std::string&                 text,
+    const std::vector<std::uint32_t>&  expected)
+{
+    const std::vector<std::uint32_t> actual = mark2haru::utf8::decode(text);
+    if (actual != expected) {
+        std::fprintf(
+            stderr,
+            "unexpected UTF-8 decode size/content: expected %zu codepoints, got %zu\n",
+            expected.size(), actual.size());
+        return false;
+    }
+    return true;
+}
+
+bool expect_piece_sizes(const std::string& text, const std::vector<std::size_t>& expected)
+{
+    const std::vector<std::string> actual = mark2haru::utf8::split_pieces(text);
+    if (actual.size() != expected.size()) {
+        std::fprintf(
+            stderr,
+            "unexpected UTF-8 piece count: expected %zu, got %zu\n",
+            expected.size(), actual.size());
+        return false;
+    }
+    for (std::size_t i = 0; i < expected.size(); ++i) {
+        if (actual[i].size() != expected[i]) {
+            std::fprintf(
+                stderr,
+                "unexpected UTF-8 piece size at %zu: expected %zu, got %zu\n",
+                i, expected[i], actual[i].size());
+            return false;
+        }
     }
     return true;
 }
@@ -201,13 +251,9 @@ int main()
             std::fprintf(stderr, "expected code block\n");
             return 25;
         }
-        if (code->language != "text") {
-            std::fprintf(stderr, "unexpected code language: '%s'\n", code->language.c_str());
-            return 26;
-        }
         if (code->text != "line one\n  *not italic*") {
             std::fprintf(stderr, "unexpected code body: '%s'\n", code->text.c_str());
-            return 27;
+            return 26;
         }
     }
 
@@ -326,6 +372,46 @@ int main()
         {
             std::fprintf(stderr, "unexpected block shape around thematic break\n");
             return 39;
+        }
+    }
+
+    {
+        const std::string valid = byte_string({
+            0x61,
+            0xC2, 0xA2,
+            0xE2, 0x82, 0xAC,
+            0xF0, 0x9F, 0x98, 0x80,
+            0x62
+        });
+        if (!expect_codepoints(valid, { 0x61, 0x00A2, 0x20AC, 0x1F600, 0x62 })) {
+            return 40;
+        }
+        if (!expect_piece_sizes(valid, { 1, 2, 3, 4, 1 })) {
+            return 41;
+        }
+    }
+
+    {
+        if (!expect_codepoints(byte_string({ 0xC0, 0xAF }), { '?', '?' })) {
+            return 42;
+        }
+        if (!expect_codepoints(byte_string({ 0xE0, 0x80, 0x80 }), { '?', '?', '?' })) {
+            return 43;
+        }
+        if (!expect_codepoints(byte_string({ 0xED, 0xA0, 0x80 }), { '?', '?', '?' })) {
+            return 44;
+        }
+        if (!expect_codepoints(byte_string({ 0xF4, 0x90, 0x80, 0x80 }), { '?', '?', '?', '?' })) {
+            return 45;
+        }
+        if (!expect_codepoints(byte_string({ 0xE2, 0x28, 0xA1 }), { '?', '(', '?' })) {
+            return 46;
+        }
+        if (!expect_codepoints(byte_string({ 0xF0, 0x9F, 0x98 }), { '?', '?', '?' })) {
+            return 47;
+        }
+        if (!expect_piece_sizes(byte_string({ 0xF0, 0x9F, 0x98 }), { 1, 1, 1 })) {
+            return 48;
         }
     }
 

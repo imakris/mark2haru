@@ -1,3 +1,6 @@
 @PACKAGE_INIT@
 
+set_and_check(mark2haru_FONT_ROOT "@PACKAGE_MARK2HARU_INSTALL_DATADIR@")
+set_and_check(mark2haru_FONT_DIR "${mark2haru_FONT_ROOT}/fonts")
+
 include("${CMAKE_CURRENT_LIST_DIR}/mark2haruTargets.cmake")

@@ -73,6 +73,13 @@ Table_columns compute_table_columns(
     const table_style_t&       style,
     const Measurement_context& metrics);
 
+double measure_table_row_height(
+    const Table_block&         table,
+    int                        row_index,
+    const Table_columns&       columns,
+    const table_style_t&       style,
+    const Measurement_context& metrics);
+
 Table_row_layout layout_table_row(
     const Table_block&         table,
     int                        row_index,

@@ -5,8 +5,14 @@ project(mark2haru VERSION 0.1.0 LANGUAGES C CXX)
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
-option(MARK2HARU_BUILD_CLI "Build the mark2haru command-line tool" ${PROJECT_IS_TOP_LEVEL})
-option(MARK2HARU_BUILD_TESTS "Build mark2haru tests" ${PROJECT_IS_TOP_LEVEL})
+if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
+    set(MARK2HARU_IS_TOP_LEVEL ON)
+else()
+    set(MARK2HARU_IS_TOP_LEVEL OFF)
+endif()
+
+option(MARK2HARU_BUILD_CLI "Build the mark2haru command-line tool" ${MARK2HARU_IS_TOP_LEVEL})
+option(MARK2HARU_BUILD_TESTS "Build mark2haru tests" ${MARK2HARU_IS_TOP_LEVEL})
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -21,6 +27,7 @@ set(MARK2HARU_BUNDLED_FONT_FILES
     DejaVuSans-BoldOblique.ttf
     DejaVuSansMono.ttf
     CACHE INTERNAL "mark2haru bundled runtime font filenames")
+set(MARK2HARU_INSTALL_DATADIR "${CMAKE_INSTALL_DATADIR}/mark2haru")
 
 function(mark2haru_copy_bundled_fonts target destination_dir)
     add_custom_command(TARGET ${target} POST_BUILD
@@ -37,6 +44,27 @@ function(mark2haru_copy_bundled_fonts target destination_dir)
     endforeach()
 endfunction()
 
+function(mark2haru_enable_warnings target)
+    if(MSVC)
+        target_compile_options(${target} PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+endfunction()
+
+add_library(mark2haru_miniz OBJECT
+    # miniz_zip.c is intentionally excluded - we only use compress2/compressBound
+    # from miniz.c (with deflate from miniz_tdef.c). The zip archive support
+    # pulls in a lot of unused code.
+    third_party/miniz/miniz.c
+    third_party/miniz/miniz_tdef.c
+    third_party/miniz/miniz_tinfl.c
+)
+
+target_include_directories(mark2haru_miniz PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/miniz
+)
+
 add_library(mark2haru_core STATIC
     src/font_context.cpp
     src/markdown.cpp
@@ -45,12 +73,7 @@ add_library(mark2haru_core STATIC
     src/render.cpp
     src/table_layout.cpp
     src/ttf_font.cpp
-    # miniz_zip.c is intentionally excluded - we only use compress2/compressBound
-    # from miniz.c (with deflate from miniz_tdef.c). The zip archive support
-    # pulls in a lot of unused code.
-    third_party/miniz/miniz.c
-    third_party/miniz/miniz_tdef.c
-    third_party/miniz/miniz_tinfl.c
+    $<TARGET_OBJECTS:mark2haru_miniz>
 )
 
 add_library(mark2haru::mark2haru ALIAS mark2haru_core)
@@ -70,11 +93,7 @@ target_include_directories(mark2haru_core
         ${CMAKE_CURRENT_SOURCE_DIR}/third_party/miniz
 )
 
-if (MSVC)
-    target_compile_options(mark2haru_core PRIVATE /W4 /permissive-)
-else()
-    target_compile_options(mark2haru_core PRIVATE -Wall -Wextra -Wpedantic)
-endif()
+mark2haru_enable_warnings(mark2haru_core)
 
 if(MARK2HARU_BUILD_CLI)
     add_executable(mark2haru
@@ -83,11 +102,12 @@ if(MARK2HARU_BUILD_CLI)
 
     target_link_libraries(mark2haru PRIVATE mark2haru_core)
 
-    if(MSVC)
-        target_compile_options(mark2haru PRIVATE /W4 /permissive-)
-    else()
-        target_compile_options(mark2haru PRIVATE -Wall -Wextra -Wpedantic)
-    endif()
+    target_compile_definitions(mark2haru PRIVATE
+        MARK2HARU_INSTALL_DATADIR="${MARK2HARU_INSTALL_DATADIR}"
+    )
+
+    mark2haru_enable_warnings(mark2haru)
+
     if(MINGW)
         target_link_options(mark2haru PRIVATE -municode)
     endif()
@@ -102,13 +122,27 @@ install(TARGETS mark2haru_core
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
+if(MARK2HARU_BUILD_CLI)
+    install(TARGETS mark2haru
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    )
+endif()
+
 install(DIRECTORY include/
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
 
 install(DIRECTORY fonts/
-    DESTINATION ${CMAKE_INSTALL_DATADIR}/mark2haru/fonts
+    DESTINATION ${MARK2HARU_INSTALL_DATADIR}/fonts
     FILES_MATCHING PATTERN "*.ttf"
+)
+
+install(FILES fonts/LICENSE.DejaVu
+    DESTINATION ${MARK2HARU_INSTALL_DATADIR}/fonts
+)
+
+install(FILES third_party/miniz/LICENSE
+    DESTINATION ${CMAKE_INSTALL_DOCDIR}/third_party/miniz
 )
 
 install(EXPORT mark2haruTargets
@@ -120,6 +154,7 @@ configure_package_config_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/cmake/mark2haruConfig.cmake.in
     ${CMAKE_CURRENT_BINARY_DIR}/mark2haruConfig.cmake
     INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/mark2haru
+    PATH_VARS MARK2HARU_INSTALL_DATADIR
 )
 
 write_basic_package_version_file(
@@ -138,75 +173,43 @@ install(FILES
 # "%PDF-". This catches silent breakage in the markdown parser, wrap engine,
 # and PDF writer without pinning to byte-exact golden files.
 if(MARK2HARU_BUILD_TESTS)
-    add_executable(test_failure_paths
-        tests/test_failure_paths.cpp
-    )
-    add_executable(test_pdf_writer
-        tests/test_pdf_writer.cpp
-    )
-    add_executable(test_png
-        tests/test_png.cpp
-    )
-    add_executable(test_markdown
-        tests/test_markdown.cpp
-    )
-    add_executable(test_table_layout
-        tests/test_table_layout.cpp
-    )
+    function(mark2haru_add_test_executable target)
+        add_executable(${target} ${ARGN})
+        target_link_libraries(${target} PRIVATE mark2haru_core)
+        mark2haru_enable_warnings(${target})
+    endfunction()
+
+    mark2haru_add_test_executable(test_failure_paths tests/test_failure_paths.cpp)
+    mark2haru_add_test_executable(test_pdf_writer tests/test_pdf_writer.cpp)
+    mark2haru_add_test_executable(test_png tests/test_png.cpp)
+    mark2haru_add_test_executable(test_markdown tests/test_markdown.cpp)
+    mark2haru_add_test_executable(test_table_layout tests/test_table_layout.cpp)
+
     if(TARGET mark2haru)
-        add_executable(test_cli_relative_image
-            tests/test_cli_relative_image.cpp
-        )
+        mark2haru_add_test_executable(test_cli_relative_image tests/test_cli_relative_image.cpp)
     endif()
 
-    target_link_libraries(test_failure_paths PRIVATE mark2haru_core)
-    target_link_libraries(test_pdf_writer PRIVATE mark2haru_core)
-    target_link_libraries(test_png PRIVATE mark2haru_core)
-    target_link_libraries(test_markdown PRIVATE mark2haru_core)
-    target_link_libraries(test_table_layout PRIVATE mark2haru_core)
+    foreach(_mark2haru_test_target IN ITEMS test_markdown test_table_layout)
+        target_include_directories(${_mark2haru_test_target} PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/src
+        )
+    endforeach()
+
+    set(_mark2haru_miniz_test_targets test_pdf_writer test_png)
     if(TARGET mark2haru)
-        target_link_libraries(test_cli_relative_image PRIVATE mark2haru_core)
+        list(APPEND _mark2haru_miniz_test_targets test_cli_relative_image)
     endif()
-    target_include_directories(test_markdown PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-    )
-    target_include_directories(test_pdf_writer PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/miniz
-    )
-    target_include_directories(test_png PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/miniz
-    )
-    if(TARGET mark2haru)
-        target_include_directories(test_cli_relative_image PRIVATE
+    foreach(_mark2haru_test_target IN LISTS _mark2haru_miniz_test_targets)
+        target_include_directories(${_mark2haru_test_target} PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/third_party/miniz
         )
-    endif()
-    target_include_directories(test_table_layout PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-    )
-    mark2haru_copy_bundled_fonts(test_pdf_writer "$<TARGET_FILE_DIR:test_pdf_writer>/fonts")
-    mark2haru_copy_bundled_fonts(test_png "$<TARGET_FILE_DIR:test_png>/fonts")
-    mark2haru_copy_bundled_fonts(test_table_layout "$<TARGET_FILE_DIR:test_table_layout>/fonts")
+    endforeach()
 
-    if(MSVC)
-        target_compile_options(test_failure_paths PRIVATE /W4 /permissive-)
-        target_compile_options(test_pdf_writer PRIVATE /W4 /permissive-)
-        target_compile_options(test_png PRIVATE /W4 /permissive-)
-        target_compile_options(test_markdown PRIVATE /W4 /permissive-)
-        target_compile_options(test_table_layout PRIVATE /W4 /permissive-)
-        if(TARGET mark2haru)
-            target_compile_options(test_cli_relative_image PRIVATE /W4 /permissive-)
-        endif()
-    else()
-        target_compile_options(test_failure_paths PRIVATE -Wall -Wextra -Wpedantic)
-        target_compile_options(test_pdf_writer PRIVATE -Wall -Wextra -Wpedantic)
-        target_compile_options(test_png PRIVATE -Wall -Wextra -Wpedantic)
-        target_compile_options(test_markdown PRIVATE -Wall -Wextra -Wpedantic)
-        target_compile_options(test_table_layout PRIVATE -Wall -Wextra -Wpedantic)
-        if(TARGET mark2haru)
-            target_compile_options(test_cli_relative_image PRIVATE -Wall -Wextra -Wpedantic)
-        endif()
-    endif()
+    foreach(_mark2haru_test_target IN ITEMS test_pdf_writer test_png test_table_layout)
+        mark2haru_copy_bundled_fonts(
+            ${_mark2haru_test_target}
+            "$<TARGET_FILE_DIR:${_mark2haru_test_target}>/fonts")
+    endforeach()
 
     enable_testing()
 
