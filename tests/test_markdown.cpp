@@ -1,4 +1,5 @@
-#include "markdown.h"
+#include <mark2haru/markdown.h>
+
 #include "utf8_decode.h"
 
 #include <climits>

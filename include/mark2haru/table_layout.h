@@ -1,9 +1,8 @@
 #pragma once
 
 #include <mark2haru/font_context.h>
+#include <mark2haru/markdown.h>
 #include <mark2haru/pdf_writer.h>
-
-#include "markdown.h"
 
 #include <string>
 #include <variant>

@@ -1,12 +1,12 @@
 #include <mark2haru/render.h>
 
 #include <mark2haru/font_context.h>
+#include <mark2haru/markdown.h>
 #include <mark2haru/pdf_writer.h>
 #include <mark2haru/png_image.h>
+#include <mark2haru/table_layout.h>
 
 #include "io_helpers.h"
-#include "markdown.h"
-#include "table_layout.h"
 #include "text_layout.h"
 
 #include <algorithm>
