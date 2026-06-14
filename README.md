@@ -1,6 +1,6 @@
 # mark2haru
 
-[![Build and test](https://github.com/imakris/mark2haru/actions/workflows/build-and-test.yml/badge.svg)](https://github.com/imakris/mark2haru/actions/workflows/build-and-test.yml)
+[![CI Linux](https://github.com/imakris/mark2haru/actions/workflows/ci-linux.yml/badge.svg?branch=master)](https://github.com/imakris/mark2haru/actions/workflows/ci-linux.yml) [![CI macOS](https://github.com/imakris/mark2haru/actions/workflows/ci-macos.yml/badge.svg?branch=master)](https://github.com/imakris/mark2haru/actions/workflows/ci-macos.yml) [![CI Windows](https://github.com/imakris/mark2haru/actions/workflows/ci-windows.yml/badge.svg?branch=master)](https://github.com/imakris/mark2haru/actions/workflows/ci-windows.yml)
 
 `mark2haru` is a small standalone Markdown-to-PDF renderer for neutral brief-style documents.
 It is derived from the Markdown/PDF path used in `briefutil`, but it deliberately removes

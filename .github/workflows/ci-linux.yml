@@ -1,4 +1,4 @@
-name: Build and test
+name: CI Linux
 
 on:
   push:
@@ -12,19 +12,11 @@ concurrency:
 
 jobs:
   build:
-    name: ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-
-    strategy:
-      fail-fast: false
-      matrix:
-        os:
-          - ubuntu-latest
-          - windows-latest
-          - macos-latest
+    name: Ubuntu
+    runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Configure
         run: >
@@ -36,12 +28,7 @@ jobs:
       - name: Build
         run: cmake --build build --config Release --parallel
 
-      - name: Run tests (Windows)
-        if: runner.os == 'Windows'
-        run: ctest --test-dir build -C Release --output-on-failure
-
-      - name: Run tests (Non-Windows)
-        if: runner.os != 'Windows'
+      - name: Run tests
         run: ctest --test-dir build --output-on-failure
 
       - name: Install and test downstream consumer
@@ -77,8 +64,4 @@ jobs:
             -DCMAKE_PREFIX_PATH="$PWD/build/_install" \
             -DCMAKE_BUILD_TYPE=Release
           cmake --build build/_consumer/_build --config Release
-          if [ -x ./build/_consumer/_build/consumer_smoke ]; then
-            ./build/_consumer/_build/consumer_smoke
-          else
-            ./build/_consumer/_build/Release/consumer_smoke.exe
-          fi
+          ./build/_consumer/_build/consumer_smoke

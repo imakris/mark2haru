@@ -1,0 +1,67 @@
+name: CI macOS
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: macOS
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Configure
+        run: >
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DMARK2HARU_BUILD_CLI=ON
+          -DMARK2HARU_BUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Run tests
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Install and test downstream consumer
+        shell: bash
+        run: |
+          cmake --install build --prefix "$PWD/build/_install" --config Release
+          mkdir -p build/_consumer
+          cat > build/_consumer/CMakeLists.txt <<'EOF'
+          cmake_minimum_required(VERSION 3.20)
+          project(mark2haru_consumer_smoke LANGUAGES CXX)
+          find_package(mark2haru CONFIG REQUIRED)
+          add_executable(consumer_smoke consumer.cpp)
+          target_link_libraries(consumer_smoke PRIVATE mark2haru::mark2haru)
+          EOF
+          cat > build/_consumer/consumer.cpp <<'EOF'
+          #include <mark2haru/mark2haru.h>
+          #include <filesystem>
+          #include <memory>
+          int main() {
+              mark2haru::Render_options options;
+              options.font_root_dir = std::filesystem::path("build/_install/share/mark2haru");
+              auto metrics = std::make_shared<mark2haru::Measurement_context>(
+                  options.font_family,
+                  options.font_root_dir);
+              if (!metrics->loaded()) {
+                  return 1;
+              }
+              mark2haru::Pdf_writer writer(100.0, 100.0, metrics);
+              return writer.fonts_loaded() ? 0 : 2;
+          }
+          EOF
+          cmake -S build/_consumer -B build/_consumer/_build \
+            -DCMAKE_PREFIX_PATH="$PWD/build/_install" \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/_consumer/_build --config Release
+          ./build/_consumer/_build/consumer_smoke
