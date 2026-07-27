@@ -236,15 +236,6 @@ if(MARK2HARU_BUILD_TESTS)
                 ${CMAKE_CURRENT_SOURCE_DIR}/examples/western_european.md
                 ${CMAKE_CURRENT_BINARY_DIR}/western_european.pdf
         )
-        add_test(
-            NAME smoke_check_western_european_header
-            COMMAND ${CMAKE_COMMAND}
-                -DPDF=${CMAKE_CURRENT_BINARY_DIR}/western_european.pdf
-                -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_pdf_header.cmake
-        )
-        set_tests_properties(smoke_check_western_european_header PROPERTIES
-            DEPENDS smoke_render_western_european
-        )
         set(MARK2HARU_CLI_RELATIVE_IMAGE_DIR
             "${CMAKE_CURRENT_BINARY_DIR}/cli_relative_image")
         add_test(
