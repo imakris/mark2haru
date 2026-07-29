@@ -123,6 +123,7 @@ fs::path Measurement_context::resolve_font_path(
         }
         if (auto resolved = search_dir(source.path); !resolved.empty())           { return resolved; }
         if (auto resolved = search_dir(source.path / "fonts"); !resolved.empty()) { return resolved; }
+        return {};
     }
 
     for (const auto& root : search_roots(font_root)) {
