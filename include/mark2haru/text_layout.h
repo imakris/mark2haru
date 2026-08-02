@@ -22,8 +22,9 @@ namespace text_layout {
 //   - a line breaks at a space or a tab, and at an explicit newline;
 //   - a run of breakable whitespace is one break opportunity and renders as
 //     one space, the way the same source reads in a browser;
-//   - a token wider than the whole line is broken at code-point boundaries,
-//     filling the tail of the current line first;
+//   - a token wider than the whole line starts on a line of its own and is
+//     then broken at code-point boundaries, so the tail of the preceding line
+//     is left empty rather than partly filled;
 //   - a separating space belongs to the word after it, so a space that falls
 //     at a line break is dropped rather than left at the end of one line or
 //     carried to the start of the next;
