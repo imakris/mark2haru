@@ -20,10 +20,13 @@ namespace text_layout {
 //
 // The policy:
 //   - a line breaks at a space or a tab, and at an explicit newline;
+//   - a run of breakable whitespace is one break opportunity and renders as
+//     one space, the way the same source reads in a browser;
 //   - a token wider than the whole line is broken at code-point boundaries,
 //     filling the tail of the current line first;
-//   - a space that would overflow the line is dropped rather than carried to
-//     the start of the next one;
+//   - a separating space belongs to the word after it, so a space that falls
+//     at a line break is dropped rather than left at the end of one line or
+//     carried to the start of the next;
 //   - consecutive pieces of the same style on one line are merged into one
 //     span, so a consumer draws the fewest possible spans.
 //
@@ -80,12 +83,25 @@ struct Line
 };
 
 // Splits each Inline_run on '\n' and on breakable whitespace. Newlines become
-// tokens with `newline=true` and empty text; each breakable whitespace
-// character becomes a single-space token; other runs of characters become word
-// tokens. Style is carried through unchanged.
+// tokens with `newline=true` and empty text; a run of breakable whitespace
+// becomes one single-space token; other runs of characters become word tokens.
+// Style is carried through unchanged.
 inline std::vector<Token> tokenize_runs(const std::vector<Inline_run>& runs)
 {
     std::vector<Token> tokens;
+
+    // Collapsing here rather than per chunk is what makes a whitespace run
+    // that straddles an inline-style boundary, or a run of tabs and spaces
+    // mixed together, come out as the single space it reads as. A leading
+    // space on a line is dropped outright, which is what the wrap engine does
+    // with it anyway.
+    auto push_space = [&tokens](Inline_style style) {
+        if (tokens.empty() || tokens.back().newline || tokens.back().text == " ") {
+            return;
+        }
+        tokens.push_back({ " ", style, false });
+    };
+
     for (const auto& run : runs) {
         std::size_t start = 0;
         while (start <= run.text.size()) {
@@ -109,7 +125,7 @@ inline std::vector<Token> tokenize_runs(const std::vector<Inline_run>& runs)
                 if (sp > piece) {
                     tokens.push_back({ chunk.substr(piece, sp - piece), run.style, false });
                 }
-                tokens.push_back({ " ", run.style, false });
+                push_space(run.style);
                 piece = sp + 1;
             }
 
@@ -149,6 +165,13 @@ std::vector<Line> wrap_tokens(
     Line   current;
     double current_width = 0.0;
 
+    // A separating space belongs to the word that follows it, not to the word
+    // before it. Holding it until that word is placed is what keeps it off the
+    // end of a line it turned out to break at.
+    bool         has_pending_space   = false;
+    double       pending_space_width = 0.0;
+    Inline_style pending_space_style = Inline_style::NORMAL;
+
     // Called before current_width advances past the span, so current_width is
     // the span's offset along the line.
     auto append_span = [&](const std::string& text, Inline_style style) {
@@ -166,16 +189,28 @@ std::vector<Line> wrap_tokens(
         current.height_pt = line_height_pt;
         current.width_pt  = current_width;
         lines.push_back(current);
-        current = Line{};
-        current_width = 0.0;
+        current           = Line{};
+        current_width     = 0.0;
+        has_pending_space = false;
+    };
+
+    auto take_pending_space = [&]() {
+        if (!has_pending_space) {
+            return;
+        }
+        append_span(" ", pending_space_style);
+        current_width += pending_space_width;
+        has_pending_space = false;
     };
 
     auto add_word = [&](const std::string& word, Inline_style style) {
         const Pdf_font font       = font_for(style);
         const double   word_width = measure(font, word, size_pt);
-        if (current_width > 0.0 && current_width + word_width > max_width_pt) {
+        const double   lead_width = has_pending_space ? pending_space_width : 0.0;
+        if (current_width > 0.0 && current_width + lead_width + word_width > max_width_pt) {
             finish_line();
         }
+        take_pending_space();
         if (word_width <= max_width_pt) {
             append_span(word, style);
             current_width += word_width;
@@ -212,14 +247,10 @@ std::vector<Line> wrap_tokens(
             continue;
         }
         if (token.text == " ") {
-            const double space_width = measure(font_for(token.style), token.text, size_pt);
-            if (!current.spans.empty() && current_width + space_width > max_width_pt) {
-                finish_line();
-            }
-            else
             if (!current.spans.empty()) {
-                append_span(token.text, token.style);
-                current_width += space_width;
+                has_pending_space   = true;
+                pending_space_style = token.style;
+                pending_space_width = measure(font_for(token.style), token.text, size_pt);
             }
             continue;
         }
