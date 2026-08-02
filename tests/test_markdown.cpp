@@ -1,6 +1,6 @@
 #include <mark2haru/markdown.h>
 
-#include "utf8_decode.h"
+#include <mark2haru/utf8_decode.h>
 
 #include <climits>
 #include <cstdio>

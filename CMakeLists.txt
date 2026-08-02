@@ -189,12 +189,6 @@ if(MARK2HARU_BUILD_TESTS)
         mark2haru_add_test_executable(test_cli_relative_image tests/test_cli_relative_image.cpp)
     endif()
 
-    # test_markdown reaches into the private utf8 decoder; the markdown and
-    # table-layout headers are public, so test_table_layout needs no src access.
-    target_include_directories(test_markdown PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-    )
-
     set(_mark2haru_miniz_test_targets test_pdf_writer test_png)
     if(TARGET mark2haru)
         list(APPEND _mark2haru_miniz_test_targets test_cli_relative_image)

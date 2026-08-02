@@ -1,8 +1,10 @@
 #pragma once
 
-// Internal UTF-8 helpers shared between the PDF writer, the measurement
-// context, and the layout engine. Kept header-only and private to `src/`
-// so it doesn't become part of the installed API surface.
+// UTF-8 helpers shared between the PDF writer, the measurement context and
+// the layout engine. Public because text_layout.h is: a consumer that wraps
+// text through this library has to slice code points the same way the
+// measurer and the writer decode them, and a private copy of this logic in
+// the consumer would diverge from them.
 
 #include <cstddef>
 #include <cstdint>

@@ -1,6 +1,6 @@
 #include <mark2haru/table_layout.h>
 
-#include "text_layout.h"
+#include <mark2haru/text_layout.h>
 
 #include <algorithm>
 #include <cstddef>
@@ -550,18 +550,15 @@ Table_row_layout layout_table_row(
             style.text_leading_pt,
             measure))
         {
-            double text_x = cell_x;
-            for (const auto& [text, inline_style] : line.spans) {
-                const Pdf_font font = font_for(inline_style);
+            for (const auto& span : line.spans) {
                 result.elements.push_back(Table_text_span{
-                    text_x,
+                    cell_x + span.x_offset_pt,
                     cell_y,
-                    text,
-                    font,
+                    span.text,
+                    font_for(span.style),
                     style.text_size_pt,
                     style.text_color
                 });
-                text_x += metrics.measure_text_width(font, text, style.text_size_pt);
             }
             cell_y += line.height_pt;
         }

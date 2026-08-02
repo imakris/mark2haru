@@ -1,7 +1,7 @@
 #include <mark2haru/pdf_writer.h>
 
 #include "pdf_font_descriptors.h"
-#include "utf8_decode.h"
+#include <mark2haru/utf8_decode.h>
 
 #include "miniz.h"
 

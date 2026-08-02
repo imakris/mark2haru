@@ -7,7 +7,7 @@
 #include <mark2haru/table_layout.h>
 
 #include "io_helpers.h"
-#include "text_layout.h"
+#include <mark2haru/text_layout.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -157,11 +157,9 @@ bool render_markdown_to_pdf(
         double size, double x, double y) -> double
     {
         for (const auto& line : lines) {
-            double tx = x;
-            for (const auto& [text, style] : line.spans) {
-                const Pdf_font font = font_for(style);
-                writer.draw_text(tx, y, size, font, text);
-                tx += measure(font, text, size);
+            for (const auto& span : line.spans) {
+                writer.draw_text(
+                    x + span.x_offset_pt, y, size, font_for(span.style), span.text);
             }
             y += line.height_pt;
         }

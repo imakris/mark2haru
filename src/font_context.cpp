@@ -1,7 +1,7 @@
 #include <mark2haru/font_context.h>
 
 #include "pdf_font_descriptors.h"
-#include "utf8_decode.h"
+#include <mark2haru/utf8_decode.h>
 
 #include <cstdlib>
 #include <filesystem>

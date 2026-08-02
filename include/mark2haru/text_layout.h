@@ -3,7 +3,7 @@
 #include <mark2haru/markdown.h>
 #include <mark2haru/pdf_writer.h>
 
-#include "utf8_decode.h"
+#include <mark2haru/utf8_decode.h>
 
 #include <cstddef>
 #include <string>
@@ -12,6 +12,31 @@
 
 namespace mark2haru {
 namespace text_layout {
+
+// The line-breaking policy for this library, and for anything that lays text
+// out alongside it. It is stated once here because a document that wraps its
+// tables through this engine and its paragraphs through a private copy breaks
+// lines in two different places on one page.
+//
+// The policy:
+//   - a line breaks at a space or a tab, and at an explicit newline;
+//   - a token wider than the whole line is broken at code-point boundaries,
+//     filling the tail of the current line first;
+//   - a space that would overflow the line is dropped rather than carried to
+//     the start of the next one;
+//   - consecutive pieces of the same style on one line are merged into one
+//     span, so a consumer draws the fewest possible spans.
+//
+// Callers supply the measurer, so the policy is independent of where the font
+// metrics come from, and they receive each span's offset along the line, so
+// nobody has to re-measure the line prefix to position a span.
+
+// Whitespace a line may break at. A tab breaks like a space rather than being
+// measured as a glyph the font may not even carry.
+inline bool is_breakable_space(char c)
+{
+    return c == ' ' || c == '\t';
+}
 
 // Maps the parser's inline-style enum to the writer's font slot. Used by
 // every wrap- or measure-shaped helper to look up the right metrics for a
@@ -35,17 +60,29 @@ struct Token
     bool           newline   = false;
 };
 
-struct Line
+struct Span
 {
-    std::vector<std::pair<std::string, Inline_style>>
-                   spans;
-    double         height_pt = 0.0;
+    std::string    text;
+    Inline_style   style       = Inline_style::NORMAL;
+
+    // Where the span starts along its line, in points from the line origin.
+    // The engine knows this while it is placing the span, so consumers that
+    // position spans absolutely do not have to measure the line prefix again.
+    double         x_offset_pt = 0.0;
 };
 
-// Splits each Inline_run on '\n' and ' '. Newlines become tokens with
-// `newline=true` and empty text; spaces become single-space tokens; other
-// runs of non-space, non-newline characters become word tokens. Style is
-// carried through unchanged.
+struct Line
+{
+    std::vector<Span>
+                   spans;
+    double         height_pt = 0.0;
+    double         width_pt  = 0.0;
+};
+
+// Splits each Inline_run on '\n' and on breakable whitespace. Newlines become
+// tokens with `newline=true` and empty text; each breakable whitespace
+// character becomes a single-space token; other runs of characters become word
+// tokens. Style is carried through unchanged.
 inline std::vector<Token> tokenize_runs(const std::vector<Inline_run>& runs)
 {
     std::vector<Token> tokens;
@@ -59,8 +96,11 @@ inline std::vector<Token> tokenize_runs(const std::vector<Inline_run>& runs)
 
             std::size_t piece = 0;
             while (piece <= chunk.size()) {
-                const std::size_t sp = chunk.find(' ', piece);
-                if (sp == std::string::npos) {
+                std::size_t sp = piece;
+                while (sp < chunk.size() && !is_breakable_space(chunk[sp])) {
+                    ++sp;
+                }
+                if (sp == chunk.size()) {
                     if (piece < chunk.size()) {
                         tokens.push_back({ chunk.substr(piece), run.style, false });
                     }
@@ -83,6 +123,13 @@ inline std::vector<Token> tokenize_runs(const std::vector<Inline_run>& runs)
     return tokens;
 }
 
+// Convenience for text that carries no inline markup of its own, such as a
+// code block or a caller's plain string: one run, one style, same policy.
+inline std::vector<Token> tokenize_text(const std::string& text, Inline_style style)
+{
+    return tokenize_runs({ Inline_run{ text, style } });
+}
+
 // Wraps a pre-tokenized sequence into lines that fit within `max_width_pt`.
 // `line_height_pt` is the resolved per-line height (callers that think in
 // terms of a leading factor pass `size_pt * factor`). `measure(font, text,
@@ -102,19 +149,22 @@ std::vector<Line> wrap_tokens(
     Line   current;
     double current_width = 0.0;
 
+    // Called before current_width advances past the span, so current_width is
+    // the span's offset along the line.
     auto append_span = [&](const std::string& text, Inline_style style) {
         if (text.empty()) {
             return;
         }
-        if (!current.spans.empty() && current.spans.back().second == style) {
-            current.spans.back().first += text;
+        if (!current.spans.empty() && current.spans.back().style == style) {
+            current.spans.back().text += text;
             return;
         }
-        current.spans.emplace_back(text, style);
+        current.spans.push_back({ text, style, current_width });
     };
 
     auto finish_line = [&]() {
         current.height_pt = line_height_pt;
+        current.width_pt  = current_width;
         lines.push_back(current);
         current = Line{};
         current_width = 0.0;
