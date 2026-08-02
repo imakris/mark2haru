@@ -135,7 +135,7 @@ bool expect_font_load_failure(
     return true;
 }
 
-bool expect_render_font_failure(const fs::path& temp_dir)
+bool expect_render_font_failure(const fs::path& temp_dir, const fs::path& font_root_dir)
 {
     const fs::path bogus_font = temp_dir / "bogus_font.bin";
     {
@@ -156,6 +156,22 @@ bool expect_render_font_failure(const fs::path& temp_dir)
 
     if (error.find("Unable to load font file") == std::string::npos) {
         std::fprintf(stderr, "unexpected font-load error: %s\n", error.c_str());
+        return false;
+    }
+
+    const fs::path missing_font = temp_dir / "missing_font.ttf";
+    options.font_family.regular = mark2haru::Font_source::from_path(missing_font);
+    options.font_root_dir       = font_root_dir;
+    error.clear();
+    if (mark2haru::render_markdown_to_pdf(
+            "hello\n", temp_dir / "missing_font.pdf", options, error))
+    {
+        std::fprintf(stderr, "render unexpectedly succeeded with missing explicit font file\n");
+        return false;
+    }
+
+    if (error.find("Unable to resolve font") == std::string::npos) {
+        std::fprintf(stderr, "unexpected font-resolution error: %s\n", error.c_str());
         return false;
     }
 
@@ -300,7 +316,7 @@ int main(int argc, char** argv)
     if (!expect_font_load_failure(temp_dir, source_font, "hmtx", 0,  "hmtx_short")) { return 6; }
     if (!expect_font_load_failure(temp_dir, source_font, "cmap", 10, "cmap_short")) { return 7; }
 
-    if (!expect_render_font_failure(temp_dir)) {
+    if (!expect_render_font_failure(temp_dir, fonts_dir)) {
         return 8;
     }
     if (!expect_render_save_failure(temp_dir, fonts_dir)) {
