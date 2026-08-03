@@ -33,31 +33,59 @@ set(MARK2HARU_BUNDLED_FONT_FILES
     DejaVuSansMono.ttf
     CACHE INTERNAL "mark2haru bundled runtime font filenames")
 set(MARK2HARU_INSTALL_DATADIR "${CMAKE_INSTALL_DATADIR}/mark2haru")
-set(MARK2HARU_BUNDLED_FONT_CONSUMERS "")
 
-# Every executable that needs the bundled fonts at run time links into the
-# same output directory, so the fonts have exactly one staging destination.
-# A per-target POST_BUILD copy therefore gives that one destination several
-# concurrent writers under a parallel build, and copy_if_different is not
-# atomic against a concurrent writer: it intermittently fails with
-# "Error copying file (if different)". One owner target stages the
-# directory and every consumer takes a dependency edge on that owner.
-function(mark2haru_own_bundled_fonts anchor_target)
-    set(_mark2haru_font_paths "")
-    foreach(_mark2haru_font IN LISTS MARK2HARU_BUNDLED_FONT_FILES)
-        list(APPEND _mark2haru_font_paths "${MARK2HARU_BUNDLED_FONT_DIR}/${_mark2haru_font}")
-    endforeach()
+# Every executable that needs the bundled fonts at run time reads them from a
+# "fonts" directory beside itself, so one output directory is one staging
+# destination. A per-target POST_BUILD copy gives that destination as many
+# concurrent writers as there are targets, and copy_if_different is not atomic
+# against a concurrent writer: under a parallel build it intermittently fails
+# with "Error copying file (if different)". So a destination gets exactly one
+# owner target that stages it, and every consumer landing there takes a
+# dependency edge on that owner instead of copying anything itself.
+#
+# Ownership is keyed by the consumer's output directory rather than by a single
+# global anchor, because a consumer is free to build all of its font consumers
+# into one output directory or to spread them over several. Keying by
+# destination collapses the first case to one owner and gives the second case
+# one owner per directory, so neither can leave a destination unstaged or give
+# one destination two writers.
+function(mark2haru_stage_bundled_fonts target)
+    get_target_property(_mark2haru_output_dir ${target} RUNTIME_OUTPUT_DIRECTORY)
+    if(NOT _mark2haru_output_dir)
+        set(_mark2haru_output_dir "${CMAKE_CURRENT_BINARY_DIR}")
+    endif()
+    # The directory is used verbatim as the key: any lossy transform of it
+    # (a C identifier, say) would map two destinations differing only in
+    # punctuation onto one owner, and the loser would never be staged.
+    set(_mark2haru_owner_property
+        "MARK2HARU_BUNDLED_FONT_OWNER_${_mark2haru_output_dir}")
 
-    # Any consumer serves as the anchor: they share one output directory,
-    # which is precisely why a single owner is required.
-    set(_mark2haru_font_dir "$<TARGET_FILE_DIR:${anchor_target}>/fonts")
-    add_custom_target(mark2haru_bundled_fonts
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${_mark2haru_font_dir}"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            ${_mark2haru_font_paths} "${_mark2haru_font_dir}"
-        COMMENT "Staging mark2haru bundled fonts"
-        VERBATIM
-    )
+    get_property(_mark2haru_owner GLOBAL PROPERTY "${_mark2haru_owner_property}")
+    if(NOT _mark2haru_owner)
+        set(_mark2haru_owner "mark2haru_bundled_fonts_for_${target}")
+
+        set(_mark2haru_font_paths "")
+        foreach(_mark2haru_font IN LISTS MARK2HARU_BUNDLED_FONT_FILES)
+            list(APPEND _mark2haru_font_paths
+                "${MARK2HARU_BUNDLED_FONT_DIR}/${_mark2haru_font}")
+        endforeach()
+
+        # The destination is spelled as a generator expression rather than as
+        # the key above so that a multi-config generator picks up its
+        # per-configuration subdirectory without this function knowing about it.
+        set(_mark2haru_font_dir "$<TARGET_FILE_DIR:${target}>/fonts")
+        add_custom_target(${_mark2haru_owner}
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${_mark2haru_font_dir}"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${_mark2haru_font_paths} "${_mark2haru_font_dir}"
+            COMMENT "Staging mark2haru bundled fonts"
+            VERBATIM
+        )
+        set_property(GLOBAL PROPERTY "${_mark2haru_owner_property}"
+            "${_mark2haru_owner}")
+    endif()
+
+    add_dependencies(${target} ${_mark2haru_owner})
 endfunction()
 
 function(mark2haru_enable_warnings target)
@@ -128,7 +156,7 @@ if(MARK2HARU_BUILD_CLI)
         target_link_options(mark2haru PRIVATE -municode)
     endif()
 
-    list(APPEND MARK2HARU_BUNDLED_FONT_CONSUMERS mark2haru)
+    mark2haru_stage_bundled_fonts(mark2haru)
 endif()
 
 install(TARGETS mark2haru_core
@@ -215,11 +243,9 @@ if(MARK2HARU_BUILD_TESTS)
         )
     endforeach()
 
-    list(APPEND MARK2HARU_BUNDLED_FONT_CONSUMERS
-        test_pdf_writer
-        test_png
-        test_table_layout
-    )
+    mark2haru_stage_bundled_fonts(test_pdf_writer)
+    mark2haru_stage_bundled_fonts(test_png)
+    mark2haru_stage_bundled_fonts(test_table_layout)
 
     enable_testing()
 
@@ -295,12 +321,4 @@ if(MARK2HARU_BUILD_TESTS)
         NAME table_layout
         COMMAND test_table_layout
     )
-endif()
-
-if(MARK2HARU_BUNDLED_FONT_CONSUMERS)
-    list(GET MARK2HARU_BUNDLED_FONT_CONSUMERS 0 _mark2haru_font_anchor)
-    mark2haru_own_bundled_fonts(${_mark2haru_font_anchor})
-    foreach(_mark2haru_font_consumer IN LISTS MARK2HARU_BUNDLED_FONT_CONSUMERS)
-        add_dependencies(${_mark2haru_font_consumer} mark2haru_bundled_fonts)
-    endforeach()
 endif()
