@@ -1,4 +1,9 @@
-cmake_minimum_required(VERSION 3.20)
+# 3.21 is the floor because the bundled-font owner target below reads
+# $<TARGET_FILE_DIR:> of a target that depends on it. Only CMP0112, new in
+# 3.21, stops that expression from adding a reverse dependency on the named
+# target; under the older behavior the two edges close a cycle and the
+# generate step fails.
+cmake_minimum_required(VERSION 3.21)
 
 project(mark2haru VERSION 0.1.0 LANGUAGES C CXX)
 
@@ -28,20 +33,31 @@ set(MARK2HARU_BUNDLED_FONT_FILES
     DejaVuSansMono.ttf
     CACHE INTERNAL "mark2haru bundled runtime font filenames")
 set(MARK2HARU_INSTALL_DATADIR "${CMAKE_INSTALL_DATADIR}/mark2haru")
+set(MARK2HARU_BUNDLED_FONT_CONSUMERS "")
 
-function(mark2haru_copy_bundled_fonts target destination_dir)
-    add_custom_command(TARGET ${target} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${destination_dir}"
+# Every executable that needs the bundled fonts at run time links into the
+# same output directory, so the fonts have exactly one staging destination.
+# A per-target POST_BUILD copy therefore gives that one destination several
+# concurrent writers under a parallel build, and copy_if_different is not
+# atomic against a concurrent writer: it intermittently fails with
+# "Error copying file (if different)". One owner target stages the
+# directory and every consumer takes a dependency edge on that owner.
+function(mark2haru_own_bundled_fonts anchor_target)
+    set(_mark2haru_font_paths "")
+    foreach(_mark2haru_font IN LISTS MARK2HARU_BUNDLED_FONT_FILES)
+        list(APPEND _mark2haru_font_paths "${MARK2HARU_BUNDLED_FONT_DIR}/${_mark2haru_font}")
+    endforeach()
+
+    # Any consumer serves as the anchor: they share one output directory,
+    # which is precisely why a single owner is required.
+    set(_mark2haru_font_dir "$<TARGET_FILE_DIR:${anchor_target}>/fonts")
+    add_custom_target(mark2haru_bundled_fonts
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${_mark2haru_font_dir}"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${_mark2haru_font_paths} "${_mark2haru_font_dir}"
+        COMMENT "Staging mark2haru bundled fonts"
         VERBATIM
     )
-    foreach(_mark2haru_font IN LISTS MARK2HARU_BUNDLED_FONT_FILES)
-        add_custom_command(TARGET ${target} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${MARK2HARU_BUNDLED_FONT_DIR}/${_mark2haru_font}"
-                "${destination_dir}/${_mark2haru_font}"
-            VERBATIM
-        )
-    endforeach()
 endfunction()
 
 function(mark2haru_enable_warnings target)
@@ -112,7 +128,7 @@ if(MARK2HARU_BUILD_CLI)
         target_link_options(mark2haru PRIVATE -municode)
     endif()
 
-    mark2haru_copy_bundled_fonts(mark2haru "$<TARGET_FILE_DIR:mark2haru>/fonts")
+    list(APPEND MARK2HARU_BUNDLED_FONT_CONSUMERS mark2haru)
 endif()
 
 install(TARGETS mark2haru_core
@@ -199,11 +215,11 @@ if(MARK2HARU_BUILD_TESTS)
         )
     endforeach()
 
-    foreach(_mark2haru_test_target IN ITEMS test_pdf_writer test_png test_table_layout)
-        mark2haru_copy_bundled_fonts(
-            ${_mark2haru_test_target}
-            "$<TARGET_FILE_DIR:${_mark2haru_test_target}>/fonts")
-    endforeach()
+    list(APPEND MARK2HARU_BUNDLED_FONT_CONSUMERS
+        test_pdf_writer
+        test_png
+        test_table_layout
+    )
 
     enable_testing()
 
@@ -279,4 +295,12 @@ if(MARK2HARU_BUILD_TESTS)
         NAME table_layout
         COMMAND test_table_layout
     )
+endif()
+
+if(MARK2HARU_BUNDLED_FONT_CONSUMERS)
+    list(GET MARK2HARU_BUNDLED_FONT_CONSUMERS 0 _mark2haru_font_anchor)
+    mark2haru_own_bundled_fonts(${_mark2haru_font_anchor})
+    foreach(_mark2haru_font_consumer IN LISTS MARK2HARU_BUNDLED_FONT_CONSUMERS)
+        add_dependencies(${_mark2haru_font_consumer} mark2haru_bundled_fonts)
+    endforeach()
 endif()
