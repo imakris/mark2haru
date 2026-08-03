@@ -140,8 +140,11 @@ inline std::vector<Token> tokenize_runs(const std::vector<Inline_run>& runs)
     return tokens;
 }
 
-// Convenience for text that carries no inline markup of its own, such as a
-// code block or a caller's plain string: one run, one style, same policy.
+// Convenience for a caller's plain string that carries no inline markup of
+// its own: one run, one style, the same policy. The policy applies whole, so
+// a run of whitespace collapses to one space and a leading one disappears
+// entirely; text whose own spacing is part of its meaning has to reach
+// wrap_tokens as tokens the caller built itself.
 inline std::vector<Token> tokenize_text(const std::string& text, Inline_style style)
 {
     return tokenize_runs({ Inline_run{ text, style } });
