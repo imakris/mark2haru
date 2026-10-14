@@ -2,81 +2,22 @@
 
 [![CI Linux](https://github.com/imakris/mark2haru/actions/workflows/ci-linux.yml/badge.svg?branch=master)](https://github.com/imakris/mark2haru/actions/workflows/ci-linux.yml) [![CI macOS](https://github.com/imakris/mark2haru/actions/workflows/ci-macos.yml/badge.svg?branch=master)](https://github.com/imakris/mark2haru/actions/workflows/ci-macos.yml) [![CI Windows](https://github.com/imakris/mark2haru/actions/workflows/ci-windows.yml/badge.svg?branch=master)](https://github.com/imakris/mark2haru/actions/workflows/ci-windows.yml)
 
-`mark2haru` is a small standalone Markdown-to-PDF renderer for neutral brief-style documents.
-It is derived from the Markdown/PDF path used in `briefutil`, but it deliberately removes
-letter-generation semantics, profile handling, Qt UI code, and branding.
+mark2haru is a small C++ library and command-line tool that turns Markdown briefs
+into PDF. It handles headings, lists, tables, code, and PNG images.
 
-The name is a legacy nod to the original `briefutil` PDF path, which started life on top of
-libHaru. This project no longer depends on libHaru (or any external PDF library) — it contains
-its own minimal PDF writer and TrueType parser, and links only the bundled `miniz` for Flate
-compression. It does not depend on system zlib.
+It is intended for short-to-medium briefs and accepts a subset of Markdown.
+Input is UTF-8; character coverage depends on the selected fonts. Rendering fails
+if required fonts cannot be resolved or loaded.
 
-## What it supports
+## Build and run
 
-- paragraphs with source-line reflow (soft line breaks join as spaces)
-- ATX headings (`#` through `######`)
-- bulleted and numbered lists with continuation lines
-- fenced code blocks
-- simple pipe tables that split across pages (headers repeat)
-- standalone PNG image blocks (`![alt](path.png)`)
-- inline `**bold**`, `*italic*`, `***bold italic***`, and `` `code` ``
-- links rendered as `text (url)` so the destination is not lost
-- thematic breaks (`---`, `***`, `___`, also spaced forms like `- - -`)
-- explicit page breaks via `<!-- pagebreak -->`
-
-## What it does not try to do
-
-- inline images inside paragraph text
-- table column alignment from `:---`, `---:`, or `:---:` separator markers
-- full CommonMark compatibility
-- font subsetting (see below)
-
-The renderer embeds TrueType fonts into the PDF. Input stays UTF-8, and Western European
-characters plus wider Unicode covered by the bundled fonts render correctly without depending
-on the viewer's installed fonts.
-
-Only the font *variants* actually used by a document are embedded — a plain brief that uses only
-regular text does not pay for bold, italic, or mono font data. Each variant that *is* used
-embeds the full TrueType file, not a per-glyph subset.
-
-Bundled fonts:
-
-- `DejaVuSans.ttf`
-- `DejaVuSans-Bold.ttf`
-- `DejaVuSans-Oblique.ttf`
-- `DejaVuSans-BoldOblique.ttf`
-- `DejaVuSansMono.ttf`
-
-These are copied next to the executable at build time and embedded into each generated PDF when
-that face is used. If you want a different font family, replace the files in `mark2haru/fonts/`
-with compatible TrueType faces using the same names.
-
-If the renderer cannot resolve or load the configured fonts, rendering fails instead of silently
-falling back to viewer-installed fonts. The library overload that accepts an error string reports
-that reason to the caller.
-
-## Build
-
-From the repository root:
+You need a C++17 compiler and CMake 3.21 or later. Fonts and compression code are
+bundled. From the repository root, using your compiler's developer shell on Windows:
 
 ```sh
-cmake -S . -B build
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release
 ```
-
-On Windows the same two commands work from a Developer Command Prompt or PowerShell.
-
-Any C++17-capable compiler and CMake 3.21+ should work.
-
-## Test
-
-Run the full suite with:
-
-```sh
-ctest --test-dir build -C Release --output-on-failure
-```
-
-## Run
 
 Render the sample brief:
 
@@ -84,70 +25,30 @@ Render the sample brief:
 ./build/mark2haru examples/neutral_brief.md build/neutral_brief.pdf
 ```
 
-Or render your own file:
+On Windows, use `build\Release\mark2haru.exe` with a multi-configuration generator,
+or `build\mark2haru.exe` with a single-configuration generator.
 
-```sh
-./build/mark2haru input.md output.pdf
-```
+## Use the library
 
-On Windows with a multi-configuration generator, the Release binary is
-`build\Release\mark2haru.exe`; single-configuration generators use `build\mark2haru.exe`.
-
-## Library Use
-
-The simplest library entry point is:
+Link your application to the CMake target `mark2haru::mark2haru`:
 
 ```cpp
-bool render_markdown_to_pdf(
-    const std::string& markdown,
-    const std::filesystem::path& output_path,
-    const Render_options& options = {});
-```
+#include <mark2haru/render.h>
 
-If you want the failure reason, use the overload with an output string:
-
-```cpp
 std::string error;
-if (!mark2haru::render_markdown_to_pdf(markdown, output_path, options, error)) {
-    // inspect `error`
-}
+bool rendered = mark2haru::render_markdown_to_pdf("# Brief\n\nHello.", "brief.pdf", {}, error);
 ```
 
-`Render_options` lets you control page geometry, body text sizing, line spacing, the asset
-base directory used for relative image paths, and the font root directory used during font
-resolution.
+The call returns `false` on failure and supplies the reason in `error`. See the
+[usage reference](docs/usage.md) for CMake integration, font locations, and rendering
+details; [render.h](include/mark2haru/render.h) defines the options and defaults.
 
-Installed CMake packages export `mark2haru_FONT_ROOT`, which points at the installed
-`share/mark2haru` data directory. Pass that value to `Render_options::font_root_dir` when
-using the bundled installed fonts from a CMake consumer.
+[neutral_brief.md](examples/neutral_brief.md) shows a brief with headings, lists,
+and a table. [western_european.md](examples/western_european.md) includes accented,
+Greek, and Cyrillic text.
 
-## Example
+## License
 
-`examples/neutral_brief.md` shows a neutral EBICS-style brief with headings, paragraphs,
-lists, and a table.
-
-`examples/western_european.md` is a focused sample with umlauts and accents for verification.
-It also includes Greek and Cyrillic to exercise Unicode text beyond Windows-1252.
-
-## Assumptions
-
-- The output is intended for short-to-medium briefs rather than long books.
-- The layout engine uses simple greedy wrapping and basic pagination.
-- Tables use content-aware column widths. Long tables split across pages and repeat the header row.
-- Standalone Markdown image blocks render PNGs. Relative image paths resolve against
-  `Render_options::asset_base_dir`; the CLI sets that directory from the input Markdown file.
-- Font coverage is defined by the bundled DejaVu family. Code points with no glyph in the
-  selected face fall back to `?` if the font has it, otherwise to the font's `.notdef` glyph.
-
-## Contributing
-
-Contributions should follow the Varinomics coding style guideline. The canonical guideline is
-published by Varinomics at <https://github.com/Varinomics/varinomics-standards>; general project
-information is available at <https://varinomics.com/>.
-
-## Attribution
-
-- Bundled DejaVu fonts are distributed under the DejaVu / Bitstream Vera license. See
-  `fonts/LICENSE.DejaVu` for the local license text.
-- `third_party/miniz` is vendored from <https://github.com/richgel999/miniz>. See
-  `third_party/miniz/LICENSE` for the local license notices.
+mark2haru uses the [BSD 2-Clause license](LICENSE). Bundled fonts have the
+[DejaVu / Bitstream Vera license](fonts/LICENSE.DejaVu), and bundled compression
+code has the [miniz license notices](third_party/miniz/LICENSE).
