@@ -38,8 +38,7 @@ by the bundled fonts render correctly without depending on the viewer's installe
 Only the font *variants* actually used by a document are embedded — a plain brief that uses only
 regular text does not pay for bold, italic, or mono font data. Each variant that *is* used
 embeds the full TrueType file, not a per-glyph subset: the `/W` widths array is trimmed to the
-used glyph set, but the `glyf`/`loca`/`cmap` tables are unchanged. True subsetting is a possible
-follow-up; it would significantly shrink the output for short documents.
+used glyph set, but the `glyf`/`loca`/`cmap` tables are unchanged.
 
 Bundled fonts:
 
@@ -61,14 +60,6 @@ PDF content streams, font streams, and Unicode CMaps are Flate-compressed when c
 the object smaller. The project uses the lightweight bundled `miniz` implementation, so it does
 not depend on system zlib.
 
-## CI Status
-
-| Platform | Build + test | Consumer install smoke | Notes |
-| :-- | :--: | :--: | :-- |
-| Linux | GitHub Actions | GitHub Actions | Configures with CMake, builds in Release, runs `ctest`, and validates an installed downstream consumer. |
-| macOS | GitHub Actions | GitHub Actions | Configures with CMake, builds in Release, runs `ctest`, and validates an installed downstream consumer. |
-| Windows | GitHub Actions | GitHub Actions | Uses the same CMake/CTest flow with the Release config on the hosted MSVC runner. |
-
 ## Build
 
 From the repository root:
@@ -80,7 +71,7 @@ cmake --build build --config Release
 
 On Windows the same two commands work from a Developer Command Prompt or PowerShell.
 
-Any C++17-capable compiler and CMake 3.20+ should work.
+Any C++17-capable compiler and CMake 3.21+ should work.
 
 ## Test
 
