@@ -9,7 +9,7 @@ letter-generation semantics, profile handling, Qt UI code, and branding.
 The name is a legacy nod to the original `briefutil` PDF path, which started life on top of
 libHaru. This project no longer depends on libHaru (or any external PDF library) — it contains
 its own minimal PDF writer and TrueType parser, and links only the bundled `miniz` for Flate
-compression.
+compression. It does not depend on system zlib.
 
 ## What it supports
 
@@ -31,14 +31,13 @@ compression.
 - full CommonMark compatibility
 - font subsetting (see below)
 
-The renderer embeds TrueType fonts into the PDF and emits Unicode text using `Identity-H`
-composite fonts. Input stays UTF-8, and Western European characters plus wider Unicode covered
-by the bundled fonts render correctly without depending on the viewer's installed fonts.
+The renderer embeds TrueType fonts into the PDF. Input stays UTF-8, and Western European
+characters plus wider Unicode covered by the bundled fonts render correctly without depending
+on the viewer's installed fonts.
 
 Only the font *variants* actually used by a document are embedded — a plain brief that uses only
 regular text does not pay for bold, italic, or mono font data. Each variant that *is* used
-embeds the full TrueType file, not a per-glyph subset: the `/W` widths array is trimmed to the
-used glyph set, but the `glyf`/`loca`/`cmap` tables are unchanged.
+embeds the full TrueType file, not a per-glyph subset.
 
 Bundled fonts:
 
@@ -56,10 +55,6 @@ If the renderer cannot resolve or load the configured fonts, rendering fails ins
 falling back to viewer-installed fonts. The library overload that accepts an error string reports
 that reason to the caller.
 
-PDF content streams, font streams, and Unicode CMaps are Flate-compressed when compression makes
-the object smaller. The project uses the lightweight bundled `miniz` implementation, so it does
-not depend on system zlib.
-
 ## Build
 
 From the repository root:
@@ -75,16 +70,10 @@ Any C++17-capable compiler and CMake 3.21+ should work.
 
 ## Test
 
-After building, the test suite covers:
-
-- smoke rendering of the bundled examples, with PDF-header verification
-- Markdown parser cases for escapes, links, lists, code blocks, tables, and explicit page breaks
-- negative-path checks for malformed font tables and render/write failure reporting
-
 Run the full suite with:
 
 ```sh
-ctest --test-dir build --output-on-failure
+ctest --test-dir build -C Release --output-on-failure
 ```
 
 ## Run
@@ -101,7 +90,8 @@ Or render your own file:
 ./build/mark2haru input.md output.pdf
 ```
 
-On Windows the binary is `build\mark2haru.exe`.
+On Windows with a multi-configuration generator, the Release binary is
+`build\Release\mark2haru.exe`; single-configuration generators use `build\mark2haru.exe`.
 
 ## Library Use
 
@@ -148,8 +138,6 @@ It also includes Greek and Cyrillic to exercise Unicode text beyond Windows-1252
   `Render_options::asset_base_dir`; the CLI sets that directory from the input Markdown file.
 - Font coverage is defined by the bundled DejaVu family. Code points with no glyph in the
   selected face fall back to `?` if the font has it, otherwise to the font's `.notdef` glyph.
-- Stream compression is size-aware rather than forced; very small objects may remain uncompressed
-  if that produces a smaller file overall.
 
 ## Contributing
 
