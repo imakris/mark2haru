@@ -55,6 +55,28 @@ bool expect_text_equals(const std::vector<Inline_run>& runs, const std::string& 
     return true;
 }
 
+bool expect_code_body(const std::string& markdown, const std::string& expected)
+{
+    const auto blocks = parse_markdown(markdown);
+    if (blocks.size() != 1) {
+        std::fprintf(stderr, "expected 1 code block, got %zu\n", blocks.size());
+        return false;
+    }
+    const auto* code = std::get_if<Code_block>(&blocks[0]);
+    if (!code) {
+        std::fprintf(stderr, "expected code block\n");
+        return false;
+    }
+    if (code->text != expected) {
+        std::fprintf(
+            stderr,
+            "code body mismatch:\nexpected: '%s'\nactual:   '%s'\n",
+            expected.c_str(), code->text.c_str());
+        return false;
+    }
+    return true;
+}
+
 std::string byte_string(std::initializer_list<unsigned int> values)
 {
     std::string out;
@@ -491,6 +513,23 @@ int main()
         }
         if (!paragraph || !expect_text_equals(paragraph->runs, "after")) {
             return 57;
+        }
+    }
+
+    {
+        // Blank lines are code content wherever they fall in the fence,
+        // including before the first non-blank line.
+        if (!expect_code_body("```\n\nx\n```\n", "\nx")) {
+            return 58;
+        }
+        if (!expect_code_body("```\n\n\nx\n```\n", "\n\nx")) {
+            return 59;
+        }
+        if (!expect_code_body("```\r\n\r\nx\r\n```\r\n", "\nx")) {
+            return 60;
+        }
+        if (!expect_code_body("```\na\n\nb\n\n```\n", "a\n\nb\n")) {
+            return 61;
         }
     }
 

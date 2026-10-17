@@ -448,6 +448,7 @@ std::vector<Block> parse_markdown(const std::string& input)
         if (trimmed.rfind("```", 0) == 0) {
             flush_paragraph();
             Code_block code;
+            bool       have_code_line = false;
             ++i;
             while (i < lines.size()) {
                 const std::string inner = trim(lines[i]);
@@ -455,9 +456,10 @@ std::vector<Block> parse_markdown(const std::string& input)
                     ++i;
                     break;
                 }
-                if (!code.text.empty()) {
+                if (have_code_line) {
                     code.text.push_back('\n');
                 }
+                have_code_line = true;
                 code.text += lines[i];
                 ++i;
             }
