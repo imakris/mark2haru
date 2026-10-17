@@ -731,7 +731,11 @@ bool Pdf_writer::save(const fs::path& path) const
     if (!out) {
         return false;
     }
-    return table.write(out, catalog_id);
+    const bool wrote = table.write(out, catalog_id);
+    // The trailer is still in the stream buffer here; closing is what commits
+    // it, so a failure to write the last bytes only shows up after close().
+    out.close();
+    return wrote && static_cast<bool>(out);
 }
 
 } // namespace mark2haru

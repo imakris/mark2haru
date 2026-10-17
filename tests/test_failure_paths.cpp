@@ -4,11 +4,18 @@
 #include <clocale>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <string>
 #include <vector>
+
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#endif
 
 namespace
 {
@@ -178,6 +185,92 @@ bool expect_render_font_failure(const fs::path& temp_dir, const fs::path& font_r
     return true;
 }
 
+// A write that fails only when the stream's last buffered bytes are committed
+// must make the render fail: the trailer and xref sit in the stream buffer
+// until the file is closed, so a failure there is the last chance to notice
+// that the PDF on disk is truncated.
+//
+// Windows: another handle holds a byte-range lock over the xref and trailer
+// of the output file, so every earlier write lands and the final commit is
+// refused. Linux: /dev/full accepts the open and rejects every write with
+// ENOSPC. The Linux document is empty Markdown so that no font is embedded
+// (an embedded font is hundreds of kilobytes, which overflows the stream
+// buffer and fails an earlier write); the whole PDF then stays in the buffer
+// until the close. Other platforms have no deterministic way to force this
+// failure.
+bool expect_render_late_write_failure(const fs::path& temp_dir, const fs::path& font_root_dir)
+{
+    mark2haru::Render_options options;
+    options.font_root_dir = font_root_dir;
+
+    std::string error;
+    bool        rendered = true;
+
+#ifdef _WIN32
+    const fs::path reference = temp_dir / "late_write_reference.pdf";
+    if (!mark2haru::render_markdown_to_pdf("hello\n", reference, options, error)) {
+        std::fprintf(stderr, "reference render failed: %s\n", error.c_str());
+        return false;
+    }
+
+    const std::vector<std::uint8_t> bytes = read_file_bytes(reference);
+    const std::string               raw(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+    const std::size_t               marker = raw.rfind("startxref\n");
+    if (marker == std::string::npos) {
+        std::fprintf(stderr, "reference render has no startxref\n");
+        return false;
+    }
+    const std::uint64_t xref_pos = std::strtoull(raw.c_str() + marker + 10, nullptr, 10);
+
+    const fs::path target = temp_dir / "late_write_locked.pdf";
+    HANDLE         holder = CreateFileW(
+        target.c_str(),
+        GENERIC_READ | GENERIC_WRITE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        nullptr,
+        CREATE_ALWAYS,
+        FILE_ATTRIBUTE_NORMAL,
+        nullptr);
+    if (holder == INVALID_HANDLE_VALUE) {
+        std::fprintf(stderr, "unable to create lock holder file\n");
+        return false;
+    }
+    if (!LockFile(
+            holder,
+            static_cast<DWORD>(xref_pos & 0xFFFFFFFFu),
+            static_cast<DWORD>(xref_pos >> 32),
+            1u << 20,
+            0))
+    {
+        std::fprintf(stderr, "unable to lock the output tail\n");
+        CloseHandle(holder);
+        return false;
+    }
+
+    error.clear();
+    rendered = mark2haru::render_markdown_to_pdf("hello\n", target, options, error);
+    CloseHandle(holder);
+#elif defined(__linux__)
+    (void)temp_dir;
+    rendered = mark2haru::render_markdown_to_pdf(
+        "", fs::path("/dev/full"), options, error);
+#else
+    (void)temp_dir;
+    std::fprintf(stderr, "skipping late-write-failure test: no way to force it on this platform\n");
+    return true;
+#endif
+
+    if (rendered) {
+        std::fprintf(stderr, "render reported success although the final write failed\n");
+        return false;
+    }
+    if (error.find("Failed to write PDF file:") == std::string::npos) {
+        std::fprintf(stderr, "unexpected late-write error: %s\n", error.c_str());
+        return false;
+    }
+    return true;
+}
+
 // PDF parsers require '.' as the decimal separator. setlocale to a locale
 // that uses ',' when one is available and verify that rendering still
 // emits a parseable PDF. That means number formatting in the writer is
@@ -324,6 +417,9 @@ int main(int argc, char** argv)
     }
     if (!expect_render_locale_independent(temp_dir, fonts_dir)) {
         return 10;
+    }
+    if (!expect_render_late_write_failure(temp_dir, fonts_dir)) {
+        return 11;
     }
 
     return 0;
