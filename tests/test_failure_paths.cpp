@@ -8,7 +8,9 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <locale>
 #include <string>
+#include <utility>
 #include <vector>
 
 #ifdef _WIN32
@@ -271,6 +273,77 @@ bool expect_render_late_write_failure(const fs::path& temp_dir, const fs::path& 
     return true;
 }
 
+// An application that groups digits in the C++ global locale ("1,131") must
+// not see that in PDF object numbers, offsets or counts. setlocale does not
+// reach C++ streams; std::locale::global does, so the same document is saved
+// under the classic locale and under grouping ones and the bytes must match.
+// Grouping by three digits reaches only numbers of 1000 or more; grouping by
+// one digit reaches every number of 10 or more, including the object numbers
+// of the later font dictionaries.
+struct Grouping_numpunct : std::numpunct<char>
+{
+    explicit Grouping_numpunct(std::string grouping)
+        : m_grouping(std::move(grouping))
+    {
+    }
+
+protected:
+    char        do_thousands_sep() const override { return ','; }
+    std::string do_grouping()      const override { return m_grouping; }
+
+private:
+    std::string m_grouping;
+};
+
+bool expect_render_grouping_locale_independent(
+    const fs::path& temp_dir,
+    const fs::path& font_root_dir)
+{
+    mark2haru::Render_options options;
+    options.font_root_dir = font_root_dir;
+
+    // Every font role is used, so every font dictionary is written.
+    const std::string markdown =
+        "# Heading\n\n"
+        "Paragraph text with **bold**, *italic*, ***both*** and `code`.\n\n"
+        "- one\n- two\n\n"
+        "| a | b |\n|---|---|\n| 1 | 2 |\n";
+
+    const fs::path classic_path = temp_dir / "grouping_classic.pdf";
+
+    std::string error;
+    if (!mark2haru::render_markdown_to_pdf(markdown, classic_path, options, error)) {
+        std::fprintf(stderr, "classic-locale render failed: %s\n", error.c_str());
+        return false;
+    }
+    const std::vector<std::uint8_t> classic_bytes = read_file_bytes(classic_path);
+
+    const std::pair<const char*, const char*> groupings[] = {
+        {"\3", "three-digit"},
+        {"\1", "one-digit"},
+    };
+    for (const auto& [grouping, name] : groupings) {
+        const fs::path grouping_path = temp_dir / (std::string("grouping_") + name + ".pdf");
+
+        const std::locale previous = std::locale::global(
+            std::locale(std::locale::classic(), new Grouping_numpunct(grouping)));
+        error.clear();
+        const bool rendered = mark2haru::render_markdown_to_pdf(
+            markdown, grouping_path, options, error);
+        std::locale::global(previous);
+        if (!rendered) {
+            std::fprintf(stderr, "%s grouping render failed: %s\n", name, error.c_str());
+            return false;
+        }
+
+        if (classic_bytes != read_file_bytes(grouping_path)) {
+            std::fprintf(stderr, "PDF bytes depend on the C++ global locale (%s grouping)\n", name);
+            return false;
+        }
+    }
+    return true;
+}
+
 // PDF parsers require '.' as the decimal separator. setlocale to a locale
 // that uses ',' when one is available and verify that rendering still
 // emits a parseable PDF. That means number formatting in the writer is
@@ -420,6 +493,9 @@ int main(int argc, char** argv)
     }
     if (!expect_render_late_write_failure(temp_dir, fonts_dir)) {
         return 11;
+    }
+    if (!expect_render_grouping_locale_independent(temp_dir, fonts_dir)) {
+        return 12;
     }
 
     return 0;

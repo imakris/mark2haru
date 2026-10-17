@@ -11,6 +11,7 @@
 #include <cmath>
 #include <fstream>
 #include <iomanip>
+#include <locale>
 #include <ostream>
 #include <sstream>
 #include <string_view>
@@ -426,6 +427,7 @@ bool Pdf_writer::draw_png(
 std::string Pdf_writer::make_to_unicode_cmap(const Loaded_font& font)
 {
     std::ostringstream cmap;
+    cmap.imbue(std::locale::classic());
     cmap << "/CIDInit /ProcSet findresource begin\n"
         << "12 dict begin\n"
         << "begincmap\n"
@@ -577,6 +579,7 @@ bool Pdf_writer::save(const fs::path& path) const
 
     {
         std::ostringstream pages_body;
+        pages_body.imbue(std::locale::classic());
         pages_body << "<< /Type /Pages /Kids [ ";
         for (const auto& p : page_objects) {
             pages_body << p.page << " 0 R ";
@@ -617,6 +620,7 @@ bool Pdf_writer::save(const fs::path& path) const
         if (italic_angle != 0.0)   { flags |= 0x40; }
 
         std::ostringstream descriptor;
+        descriptor.imbue(std::locale::classic());
         descriptor << "<< /Type /FontDescriptor /FontName /" << m_metrics->font_tag_name(font_id)
             << " /Flags " << flags
             << " /Ascent " << number_to_string(ascent)
@@ -630,6 +634,7 @@ bool Pdf_writer::save(const fs::path& path) const
         table.emit(ids.descriptor, descriptor.str());
 
         std::ostringstream widths;
+        widths.imbue(std::locale::classic());
         widths << "[ ";
         std::vector<std::uint16_t> used = sorted_used_glyphs(slot.used_glyphs);
         if (used.empty()) {
@@ -646,6 +651,7 @@ bool Pdf_writer::save(const fs::path& path) const
         widths << "]";
 
         std::ostringstream cidfont;
+        cidfont.imbue(std::locale::classic());
         cidfont << "<< /Type /Font /Subtype /CIDFontType2 /BaseFont /" << m_metrics->font_tag_name(font_id)
             << " /FontDescriptor " << ids.descriptor << " 0 R /CIDSystemInfo << /Registry (Adobe)"
             << " /Ordering (Identity) /Supplement 0 >> /CIDToGIDMap /Identity /DW "
@@ -655,7 +661,8 @@ bool Pdf_writer::save(const fs::path& path) const
         table.emit(ids.to_unicode, build_stream_object(make_to_unicode_cmap(slot)));
 
         std::ostringstream type0;
-        type0 << "<< /Type /Font /Subtype /Type0 /BaseFont /" << m_metrics->font_tag_name(font_id)
+        type0.imbue(std::locale::classic());
+        type0 <<"<< /Type /Font /Subtype /Type0 /BaseFont /" << m_metrics->font_tag_name(font_id)
             << " /Encoding /Identity-H /DescendantFonts [ " << ids.cid
             << " 0 R ] /ToUnicode " << ids.to_unicode << " 0 R >>";
         table.emit(ids.type0, type0.str());
@@ -663,6 +670,7 @@ bool Pdf_writer::save(const fs::path& path) const
 
     auto image_dict = [](int w, int h, const char* colorspace, int smask_id) {
         std::ostringstream out;
+        out.imbue(std::locale::classic());
         out << " /Type /XObject /Subtype /Image /Width " << w
             << " /Height " << h
             << " /ColorSpace " << colorspace
@@ -701,6 +709,7 @@ bool Pdf_writer::save(const fs::path& path) const
         table.emit(ids.content, build_stream_object(page.content));
 
         std::ostringstream resources;
+        resources.imbue(std::locale::classic());
         resources << "<< /Font << ";
         for (std::size_t font_index = 0; font_index < used_font_ids.size(); ++font_index) {
             resources << font_resource_name(used_font_ids[font_index]) << ' '
@@ -719,6 +728,7 @@ bool Pdf_writer::save(const fs::path& path) const
         resources << " >>";
 
         std::ostringstream page_body;
+        page_body.imbue(std::locale::classic());
         page_body << "<< /Type /Page /Parent " << pages_id << " 0 R /MediaBox [0 0 "
             << number_to_string(m_page_width_pt) << ' '
             << number_to_string(m_page_height_pt) << "] /Resources "
@@ -727,7 +737,9 @@ bool Pdf_writer::save(const fs::path& path) const
         table.emit(ids.page, page_body.str());
     }
 
-    std::ofstream out(path, std::ios::binary);
+    std::ofstream out;
+    out.imbue(std::locale::classic());
+    out.open(path, std::ios::binary);
     if (!out) {
         return false;
     }
