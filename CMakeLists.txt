@@ -228,6 +228,7 @@ if(MARK2HARU_BUILD_TESTS)
     mark2haru_add_test_executable(test_png tests/test_png.cpp)
     mark2haru_add_test_executable(test_markdown tests/test_markdown.cpp)
     mark2haru_add_test_executable(test_table_layout tests/test_table_layout.cpp)
+    mark2haru_add_test_executable(test_text_layout tests/test_text_layout.cpp)
     mark2haru_add_test_executable(test_render_pagination tests/test_render_pagination.cpp)
 
     if(TARGET mark2haru)
@@ -322,6 +323,10 @@ if(MARK2HARU_BUILD_TESTS)
     add_test(
         NAME table_layout
         COMMAND test_table_layout
+    )
+    add_test(
+        NAME text_layout
+        COMMAND test_text_layout
     )
     add_test(
         NAME render_pagination

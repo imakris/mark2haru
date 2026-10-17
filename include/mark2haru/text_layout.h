@@ -22,9 +22,12 @@ namespace text_layout {
 //   - a line breaks at a space or a tab, and at an explicit newline;
 //   - a run of breakable whitespace is one break opportunity and renders as
 //     one space, the way the same source reads in a browser;
-//   - a token wider than the whole line starts on a line of its own and is
-//     then broken at code-point boundaries, so the tail of the preceding line
-//     is left empty rather than partly filled;
+//   - a word is a run of characters between breaks, however many style runs
+//     it spans: a style change inside a word is not a break opportunity;
+//   - a word wider than the whole line starts on a line of its own and is
+//     then broken at code-point boundaries, whatever the style of the piece
+//     being placed, so the tail of the preceding line is left empty rather
+//     than partly filled;
 //   - a separating space belongs to the word after it, so a space that falls
 //     at a line break is dropped rather than left at the end of one line or
 //     carried to the start of the next;
@@ -150,6 +153,26 @@ inline std::vector<Token> tokenize_text(const std::string& text, Inline_style st
     return tokenize_runs({ Inline_run{ text, style } });
 }
 
+// tokenize_runs emits one word token per style run, so a word whose style
+// changes inside it arrives as several adjacent word tokens with no space or
+// newline between them. These two helpers define a word over that sequence, so
+// the wrap engine and any caller measuring minimum widths agree on it.
+inline bool is_word_token(const Token& token)
+{
+    return !token.newline && !token.text.empty() && token.text != " ";
+}
+
+// One past the last token of the word that starts at tokens[begin], which must
+// be a word token.
+inline std::size_t word_end(const std::vector<Token>& tokens, std::size_t begin)
+{
+    std::size_t end = begin + 1;
+    while (end < tokens.size() && is_word_token(tokens[end])) {
+        ++end;
+    }
+    return end;
+}
+
 // Wraps a pre-tokenized sequence into lines that fit within `max_width_pt`.
 // `line_height_pt` is the resolved per-line height (callers that think in
 // terms of a leading factor pass `size_pt * factor`). `measure(font, text,
@@ -207,47 +230,67 @@ std::vector<Line> wrap_tokens(
         has_pending_space = false;
     };
 
-    auto add_word = [&](const std::string& word, Inline_style style) {
-        const Pdf_font font       = font_for(style);
-        const double   word_width = measure(font, word, size_pt);
-        const double   lead_width = has_pending_space ? pending_space_width : 0.0;
+    // Places tokens[begin, end), the fragments of one word, as a unit: the
+    // word breaks to the next line as a whole if it does not fit the rest of
+    // this one, wherever its style changes fall.
+    auto add_word = [&](std::size_t begin, std::size_t end) {
+        double word_width = 0.0;
+        for (std::size_t i = begin; i < end; ++i) {
+            word_width += measure(font_for(tokens[i].style), tokens[i].text, size_pt);
+        }
+        const double lead_width = has_pending_space ? pending_space_width : 0.0;
         if (current_width > 0.0 && current_width + lead_width + word_width > max_width_pt) {
             finish_line();
         }
         take_pending_space();
         if (word_width <= max_width_pt) {
-            append_span(word, style);
-            current_width += word_width;
+            for (std::size_t i = begin; i < end; ++i) {
+                const Token& fragment = tokens[i];
+                append_span(fragment.text, fragment.style);
+
+                // A word of one token has just been measured; only the
+                // fragments of a styled word need their own width again.
+                current_width += end - begin == 1
+                    ? word_width
+                    : measure(font_for(fragment.style), fragment.text, size_pt);
+            }
             return;
         }
 
-        // Word is wider than a full line: break it at code-point boundaries.
-        std::string fragment;
-        double      fragment_width = 0.0;
-        for (const auto& piece : utf8::split_pieces(word)) {
-            const double piece_width = measure(font, piece, size_pt);
-            const bool   has_content = current_width > 0.0 || fragment_width > 0.0;
-            if (has_content && current_width + fragment_width + piece_width > max_width_pt) {
-                if (!fragment.empty()) {
-                    append_span(fragment, style);
-                    current_width += fragment_width;
-                    fragment.clear();
-                    fragment_width = 0.0;
+        // Word is wider than a full line: break it at code-point boundaries,
+        // continuing across its style changes.
+        for (std::size_t i = begin; i < end; ++i) {
+            const Token&   token = tokens[i];
+            const Pdf_font font  = font_for(token.style);
+            std::string    fragment;
+            double         fragment_width = 0.0;
+            for (const auto& piece : utf8::split_pieces(token.text)) {
+                const double piece_width = measure(font, piece, size_pt);
+                const bool   has_content = current_width > 0.0 || fragment_width > 0.0;
+                if (has_content && current_width + fragment_width + piece_width > max_width_pt) {
+                    if (!fragment.empty()) {
+                        append_span(fragment, token.style);
+                        current_width += fragment_width;
+                        fragment.clear();
+                        fragment_width = 0.0;
+                    }
+                    finish_line();
                 }
-                finish_line();
+                fragment += piece;
+                fragment_width += piece_width;
             }
-            fragment += piece;
-            fragment_width += piece_width;
-        }
-        if (!fragment.empty()) {
-            append_span(fragment, style);
-            current_width += fragment_width;
+            if (!fragment.empty()) {
+                append_span(fragment, token.style);
+                current_width += fragment_width;
+            }
         }
     };
 
-    for (const auto& token : tokens) {
+    for (std::size_t i = 0; i < tokens.size();) {
+        const Token& token = tokens[i];
         if (token.newline) {
             finish_line();
+            ++i;
             continue;
         }
         if (token.text == " ") {
@@ -256,11 +299,16 @@ std::vector<Line> wrap_tokens(
                 pending_space_style = token.style;
                 pending_space_width = measure(font_for(token.style), token.text, size_pt);
             }
+            ++i;
             continue;
         }
-        if (!token.text.empty()) {
-            add_word(token.text, token.style);
+        if (!is_word_token(token)) {
+            ++i;
+            continue;
         }
+        const std::size_t end = word_end(tokens, i);
+        add_word(i, end);
+        i = end;
     }
 
     if (!current.spans.empty() || lines.empty()) {

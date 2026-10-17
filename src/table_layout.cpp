@@ -73,13 +73,22 @@ double cell_min_width(
     double                         size_pt,
     const Measurement_context&     metrics)
 {
-    double max_word = 0.0;
-    for (const auto& token : text_layout::tokenize_runs(runs)) {
-        if (!token.text.empty() && token.text != " ") {
-            max_word = std::max(
-                max_word,
-                metrics.measure_text_width(font_for(token.style), token.text, size_pt));
+    // The narrowest column is the widest word, and a word that changes style
+    // inside it is still one word: wrap_tokens will not break it there.
+    const auto tokens   = text_layout::tokenize_runs(runs);
+    double     max_word = 0.0;
+    for (std::size_t i = 0; i < tokens.size();) {
+        if (!text_layout::is_word_token(tokens[i])) {
+            ++i;
+            continue;
         }
+        const std::size_t end        = text_layout::word_end(tokens, i);
+        double            word_width = 0.0;
+        for (; i < end; ++i) {
+            word_width += metrics.measure_text_width(
+                font_for(tokens[i].style), tokens[i].text, size_pt);
+        }
+        max_word = std::max(max_word, word_width);
     }
     return max_word;
 }

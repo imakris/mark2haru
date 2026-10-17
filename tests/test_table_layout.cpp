@@ -396,6 +396,56 @@ bool expect_overwide_table_keeps_text_inside_cells(const Measurement_context& me
     return true;
 }
 
+bool expect_styled_compound_word_keeps_its_whole_width(const Measurement_context& metrics)
+{
+    table_style_t style;
+    style.text_size_pt    = 10.0;
+    style.text_leading_pt = 12.0;
+    style.cell_padding_pt =  4.0;
+
+    // A word whose style changes in the middle is still one word, so its
+    // column must be able to hold it whole. The second column wants far more
+    // room than there is, so the first can only keep its word intact if its
+    // minimum width accounts for all of it.
+    Table_block table;
+    table.rows = {
+        row({
+            cell({
+                { "pre", Inline_style::NORMAL },
+                { "fix", Inline_style::BOLD   },
+            }),
+            text_cell("bb bb bb bb bb bb bb bb bb bb bb bb"),
+        }),
+    };
+
+    const double pad        = 2.0 * style.cell_padding_pt;
+    const double word_width =
+        metrics.measure_text_width(Pdf_font::REGULAR, "pre", style.text_size_pt)
+        + metrics.measure_text_width(Pdf_font::BOLD, "fix", style.text_size_pt);
+    const double other_min  =
+        metrics.measure_text_width(Pdf_font::REGULAR, "bb", style.text_size_pt) + pad;
+
+    const Table_columns columns = compute_table_columns(
+        table,
+        word_width + pad + other_min + 0.5,
+        style,
+        metrics);
+    if (!check(columns.valid, "expected columns for a table with a styled compound word")) {
+        return false;
+    }
+
+    const Table_row_layout layout = layout_table_row(table, 0, columns, 0.0, 0.0, style, metrics);
+    const auto* pre = find_text_span(layout, "pre");
+    const auto* fix = find_text_span(layout, "fix");
+    if (!check(pre != nullptr && fix != nullptr,
+            "styled compound word was split inside a style fragment"))
+    {
+        return false;
+    }
+    return check(nearly_equal(pre->y_pt, fix->y_pt),
+        "styled compound word was broken at its style change");
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -421,6 +471,9 @@ int main(int argc, char** argv)
     }
     if (!expect_overwide_table_keeps_text_inside_cells(*metrics)) {
         return 7;
+    }
+    if (!expect_styled_compound_word_keeps_its_whole_width(*metrics)) {
+        return 8;
     }
 
     return 0;
