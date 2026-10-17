@@ -555,14 +555,19 @@ std::vector<Block> parse_markdown(const std::string& input)
                 {
                     flush_paragraph();
                     Table_block table;
+                    // Only the line right after the header is the delimiter
+                    // row; a later line that merely looks like one is data.
+                    const size_t delimiter_index = i + 1;
+                    table.has_header             = true;
                     while (i < lines.size()) {
-                        const Classified_line row_line = classify_line(lines[i]);
-                        if (row_line.type == Classified_line::Type::TABLE_SEPARATOR) {
-                            table.has_header = true;
+                        if (i == delimiter_index) {
                             ++i;
                             continue;
                         }
-                        if (row_line.type != Classified_line::Type::TABLE_ROW) {
+                        const Classified_line row_line = classify_line(lines[i]);
+                        if (row_line.type != Classified_line::Type::TABLE_ROW &&
+                            row_line.type != Classified_line::Type::TABLE_SEPARATOR)
+                        {
                             break;
                         }
 

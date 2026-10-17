@@ -416,5 +416,83 @@ int main()
         }
     }
 
+    {
+        // Only the line right after the header is the delimiter row. A later
+        // line made of dashes and pipes is ordinary body data, not structure.
+        const auto blocks = parse_markdown(
+            "| Item | Result |\n"
+            "| --- | --- |\n"
+            "| - | - |\n"
+            "| done | 1 |\n");
+        if (blocks.size() != 1) {
+            std::fprintf(stderr, "expected 1 placeholder table block, got %zu\n", blocks.size());
+            return 49;
+        }
+        const auto* table = std::get_if<Table_block>(&blocks[0]);
+        if (!table || !table->has_header || table->rows.size() != 3) {
+            std::fprintf(stderr, "placeholder row was dropped from the table\n");
+            return 50;
+        }
+        if (table->rows[1].cells.size() != 2 ||
+            !expect_text_equals(table->rows[1].cells[0].runs, "-") ||
+            !expect_text_equals(table->rows[1].cells[1].runs, "-") ||
+            !expect_text_equals(table->rows[2].cells[0].runs, "done"))
+        {
+            return 51;
+        }
+    }
+
+    {
+        // Delimiter-shaped lines after the real delimiter stay body rows, in
+        // order, and do not change which row is the header.
+        const auto blocks = parse_markdown(
+            "| Item | Result |\n"
+            "| --- | --- |\n"
+            "| --- | --- |\n"
+            "| :-- | --: |\n"
+            "| a | b |\n");
+        if (blocks.size() != 1) {
+            std::fprintf(stderr, "expected 1 repeated-delimiter table block, got %zu\n", blocks.size());
+            return 52;
+        }
+        const auto* table = std::get_if<Table_block>(&blocks[0]);
+        if (!table || !table->has_header || table->rows.size() != 4) {
+            std::fprintf(stderr, "delimiter-shaped body rows were dropped from the table\n");
+            return 53;
+        }
+        if (!expect_text_equals(table->rows[0].cells[0].runs, "Item") ||
+            !expect_text_equals(table->rows[1].cells[0].runs, "---") ||
+            !expect_text_equals(table->rows[2].cells[0].runs, ":--") ||
+            !expect_text_equals(table->rows[2].cells[1].runs, "--:") ||
+            !expect_text_equals(table->rows[3].cells[1].runs, "b"))
+        {
+            return 54;
+        }
+    }
+
+    {
+        // A placeholder row at the end of a table is kept, and the table still
+        // ends at the first line that is not a table line.
+        const auto blocks = parse_markdown(
+            "| Item | Result |\n"
+            "| --- | --- |\n"
+            "| - | - |\n"
+            "\n"
+            "after\n");
+        if (blocks.size() != 2) {
+            std::fprintf(stderr, "expected table and paragraph, got %zu blocks\n", blocks.size());
+            return 55;
+        }
+        const auto* table     = std::get_if<Table_block>(&blocks[0]);
+        const auto* paragraph = std::get_if<Paragraph_block>(&blocks[1]);
+        if (!table || !table->has_header || table->rows.size() != 2) {
+            std::fprintf(stderr, "trailing placeholder row was dropped from the table\n");
+            return 56;
+        }
+        if (!paragraph || !expect_text_equals(paragraph->runs, "after")) {
+            return 57;
+        }
+    }
+
     return 0;
 }
