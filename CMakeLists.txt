@@ -228,12 +228,13 @@ if(MARK2HARU_BUILD_TESTS)
     mark2haru_add_test_executable(test_png tests/test_png.cpp)
     mark2haru_add_test_executable(test_markdown tests/test_markdown.cpp)
     mark2haru_add_test_executable(test_table_layout tests/test_table_layout.cpp)
+    mark2haru_add_test_executable(test_render_pagination tests/test_render_pagination.cpp)
 
     if(TARGET mark2haru)
         mark2haru_add_test_executable(test_cli_relative_image tests/test_cli_relative_image.cpp)
     endif()
 
-    set(_mark2haru_miniz_test_targets test_pdf_writer test_png)
+    set(_mark2haru_miniz_test_targets test_pdf_writer test_png test_render_pagination)
     if(TARGET mark2haru)
         list(APPEND _mark2haru_miniz_test_targets test_cli_relative_image)
     endif()
@@ -246,6 +247,7 @@ if(MARK2HARU_BUILD_TESTS)
     mark2haru_stage_bundled_fonts(test_pdf_writer)
     mark2haru_stage_bundled_fonts(test_png)
     mark2haru_stage_bundled_fonts(test_table_layout)
+    mark2haru_stage_bundled_fonts(test_render_pagination)
 
     enable_testing()
 
@@ -320,5 +322,9 @@ if(MARK2HARU_BUILD_TESTS)
     add_test(
         NAME table_layout
         COMMAND test_table_layout
+    )
+    add_test(
+        NAME render_pagination
+        COMMAND test_render_pagination
     )
 endif()

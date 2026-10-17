@@ -130,7 +130,10 @@ bool render_markdown_to_pdf(
     constexpr double  border_line_width = 0.75;
 
     const double content_width = options.page_width_pt - options.margin_left_pt - options.margin_right_pt;
+    const double content_bottom = options.page_height_pt - options.margin_bottom_pt;
+    const double content_height = content_bottom - options.margin_top_pt;
     double       cursor_y      = options.margin_top_pt;
+    bool         render_ok     = true;
 
     auto new_page = [&]() {
         writer.begin_page();
@@ -138,7 +141,7 @@ bool render_markdown_to_pdf(
     };
 
     auto ensure_space = [&](double height_pt) {
-        if (cursor_y + height_pt > options.page_height_pt - options.margin_bottom_pt) {
+        if (cursor_y + height_pt > content_bottom) {
             new_page();
         }
     };
@@ -147,30 +150,50 @@ bool render_markdown_to_pdf(
         return metrics->measure_text_width(font, text, size_pt);
     };
 
-    // Draws a sequence of lines starting at (x, y), advancing y by each
-    // line's height. Returns the y after the last line. Used by every
-    // block that draws text: paragraph/heading/list pass cursor_y in and
-    // store the result back; code passes a local box-relative y in and
-    // ignores the return.
-    auto draw_lines_at = [&](
-        const std::vector<Line>& lines,
-        double size, double x, double y) -> double
+    auto draw_line_at = [&](const Line& line, double size, double x, double y)
     {
-        for (const auto& line : lines) {
-            for (const auto& span : line.spans) {
-                writer.draw_text(
-                    x + span.x_offset_pt, y, size, font_for(span.style), span.text);
-            }
-            y += line.height_pt;
+        for (const auto& span : line.spans) {
+            writer.draw_text(
+                x + span.x_offset_pt, y, size, font_for(span.style), span.text);
         }
-        return y;
+    };
+
+    // Keep ordinary blocks together, but reserve only the first line for a
+    // block that must span pages. Never move an oversized block to an empty
+    // page and then draw the rest below that page's bottom margin.
+    auto prepare_lines = [&](const std::vector<Line>& lines, double before, double after) {
+        const double first_height = before + (lines.empty() ? 0.0 : lines.front().height_pt);
+        if (first_height > content_height) {
+            error = "Page content area is too short for a line of text";
+            render_ok = false;
+            return false;
+        }
+        const double height = before + total_height(lines) + after;
+        ensure_space(height <= content_height ? height : first_height);
+        cursor_y += before;
+        return true;
+    };
+
+    auto draw_text_lines = [&](const std::vector<Line>& lines, double size, double x) {
+        for (const auto& line : lines) {
+            if (line.height_pt > content_height) {
+                error = "Page content area is too short for a line of text";
+                render_ok = false;
+                return;
+            }
+            ensure_space(line.height_pt);
+            draw_line_at(line, size, x, cursor_y);
+            cursor_y += line.height_pt;
+        }
     };
 
     auto on_paragraph = [&](const Paragraph_block& pb) {
         const auto lines = wrap_runs(pb.runs, content_width, options.body_size_pt,
             options.body_size_pt * options.line_spacing, measure);
-        ensure_space(total_height(lines) + options.body_size_pt * 0.25);
-        cursor_y = draw_lines_at(lines, options.body_size_pt, options.margin_left_pt, cursor_y);
+        if (!prepare_lines(lines, 0.0, options.body_size_pt * 0.25)) {
+            return;
+        }
+        draw_text_lines(lines, options.body_size_pt, options.margin_left_pt);
         cursor_y += options.body_size_pt * 0.35;
     };
 
@@ -180,9 +203,10 @@ bool render_markdown_to_pdf(
         const double space_before = size * hm.space_before_factor;
         const double space_after  = size * hm.space_after_factor;
         const auto   lines        = wrap_runs(hb.runs, content_width, size, size * 1.15, measure);
-        ensure_space(space_before + total_height(lines) + space_after);
-        cursor_y += space_before;
-        cursor_y = draw_lines_at(lines, size, options.margin_left_pt, cursor_y);
+        if (!prepare_lines(lines, space_before, space_after)) {
+            return;
+        }
+        draw_text_lines(lines, size, options.margin_left_pt);
         cursor_y += space_after;
     };
 
@@ -199,11 +223,16 @@ bool render_markdown_to_pdf(
                 options.body_size_pt,
                 options.body_size_pt * options.line_spacing,
                 measure);
-            ensure_space(total_height(lines) + options.body_size_pt * 0.2);
+            if (!prepare_lines(lines, 0.0, options.body_size_pt * 0.2)) {
+                return;
+            }
             writer.draw_text(
                 options.margin_left_pt, cursor_y,
                 options.body_size_pt, Pdf_font::REGULAR, marker);
-            cursor_y = draw_lines_at(lines, options.body_size_pt, item_left, cursor_y);
+            draw_text_lines(lines, options.body_size_pt, item_left);
+            if (!render_ok) {
+                return;
+            }
             cursor_y += options.body_size_pt * 0.15;
         }
         cursor_y += options.body_size_pt * 0.15;
@@ -256,16 +285,50 @@ bool render_markdown_to_pdf(
         const double available_width = content_width - pad * 2.0;
         const auto   lines           = code_lines(cb.text, available_width, size, size * 1.25, measure);
         const double height          = total_height(lines) + pad * 2.0;
-        ensure_space(height + options.body_size_pt * 0.2);
-        writer.fill_rect(options.margin_left_pt, cursor_y, content_width, height,
-            code_block_fill);
-        draw_lines_at(lines, size, options.margin_left_pt + pad, cursor_y + pad);
-        writer.stroke_rect(options.margin_left_pt, cursor_y, content_width, height,
-            default_stroke, border_line_width);
-        cursor_y += height + options.body_size_pt * 0.25;
-    };
+        if (pad * 2.0 + lines.front().height_pt > content_height) {
+            error = "Page content area is too short for a line of code and its padding";
+            render_ok = false;
+            return;
+        }
+        const double reserved_height = height + options.body_size_pt * 0.2;
+        ensure_space(reserved_height <= content_height
+            ? reserved_height : pad * 2.0 + lines.front().height_pt);
 
-    bool render_ok = true;
+        std::size_t first = 0;
+        while (first < lines.size()) {
+            double chunk_height = pad * 2.0;
+            std::size_t end = first;
+            while (end < lines.size()
+                && cursor_y + chunk_height + lines[end].height_pt <= content_bottom) {
+                chunk_height += lines[end].height_pt;
+                ++end;
+            }
+            if (end == first) {
+                if (cursor_y == options.margin_top_pt) {
+                    error = "Page content area is too short for a line of code and its padding";
+                    render_ok = false;
+                    return;
+                }
+                new_page();
+                continue;
+            }
+            writer.fill_rect(options.margin_left_pt, cursor_y, content_width, chunk_height,
+                code_block_fill);
+            double line_y = cursor_y + pad;
+            for (std::size_t i = first; i < end; ++i) {
+                draw_line_at(lines[i], size, options.margin_left_pt + pad, line_y);
+                line_y += lines[i].height_pt;
+            }
+            writer.stroke_rect(options.margin_left_pt, cursor_y, content_width, chunk_height,
+                default_stroke, border_line_width);
+            cursor_y += chunk_height;
+            first = end;
+            if (first < lines.size()) {
+                new_page();
+            }
+        }
+        cursor_y += options.body_size_pt * 0.25;
+    };
 
     auto on_table = [&](const Table_block& tb) {
         if (tb.rows.empty()) {
