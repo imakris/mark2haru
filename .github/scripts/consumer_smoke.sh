@@ -23,3 +23,6 @@ if [ ! -x "$smoke" ]; then
     smoke="$smoke.exe"
 fi
 "$smoke" "$install_prefix"
+
+python_command="$(command -v python3 || command -v python)"
+"$python_command" tests/test_cli_installed_fonts.py "$install_prefix"

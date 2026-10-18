@@ -2,6 +2,18 @@
 
 #include "io_helpers.h"
 
+#ifdef _WIN32
+#define NOMINMAX
+#include <windows.h>
+#else
+#include <unistd.h>
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#endif
+#endif
+
+#include <cstdlib>
+#include <cstdint>
 #include <filesystem>
 #include <iostream>
 #include <string>
@@ -46,15 +58,78 @@ fs::path installed_font_root(const fs::path& exe_dir)
 #endif
 }
 
-fs::path resolve_font_root(const fs::path& exe_path)
+fs::path resolve_executable_path(const fs::path& argv0)
 {
-    std::error_code ec;
-    fs::path        exe_abs = fs::absolute(exe_path, ec);
-    if (ec) {
-        exe_abs = exe_path;
+    // argv[0] can be a bare command or a launcher symlink, neither of which
+    // identifies the directory containing the installed resources.
+    fs::path path;
+#ifdef _WIN32
+    std::vector<wchar_t> buffer(256);
+    while (buffer.size() <= 32768) {
+        const DWORD size  = (DWORD)buffer.size();
+        const DWORD count = GetModuleFileNameW(nullptr, buffer.data(), size);
+        if (count == 0) {
+            break;
+        }
+        if (count < size) {
+            path = std::wstring(buffer.data(), count);
+            break;
+        }
+        buffer.resize(buffer.size() * 2);
+    }
+#elif defined(__APPLE__)
+    std::vector<char> buffer(1024);
+    std::uint32_t size = (std::uint32_t)buffer.size();
+    if (_NSGetExecutablePath(buffer.data(), &size) != 0) {
+        buffer.resize(size);
+    }
+    if (_NSGetExecutablePath(buffer.data(), &size) == 0) {
+        path = buffer.data();
+    }
+#elif defined(__linux__)
+    std::error_code link_error;
+    path = fs::read_symlink("/proc/self/exe", link_error);
+#endif
+
+    if (path.empty()) {
+        path = argv0;
+#ifndef _WIN32
+        // Linux can run without procfs; other POSIX systems also need PATH
+        // lookup when the process image is unavailable through a native API.
+        const char* env_path = std::getenv("PATH");
+        if (!argv0.has_parent_path() && env_path) {
+            const std::string search(env_path);
+            std::size_t start = 0;
+            while (start <= search.size()) {
+                const auto end   = search.find(':', start);
+                const auto entry = search.substr(start, end == search.npos ? search.npos : end - start);
+                const fs::path candidate = (entry.empty() ? fs::path(".") : fs::path(entry)) / argv0;
+                std::error_code ec;
+                if (fs::is_regular_file(candidate, ec) && access(candidate.c_str(), X_OK) == 0) {
+                    path = candidate;
+                    break;
+                }
+                if (end == search.npos) {
+                    break;
+                }
+                start = end + 1;
+            }
+        }
+#endif
     }
 
-    const fs::path exe_dir = exe_abs.parent_path();
+    std::error_code ec;
+    const auto canonical = fs::canonical(path, ec);
+    if (!ec) {
+        return canonical;
+    }
+    const auto absolute = fs::absolute(path, ec);
+    return ec ? path : absolute;
+}
+
+fs::path resolve_font_root(const fs::path& exe_path)
+{
+    const fs::path exe_dir = resolve_executable_path(exe_path).parent_path();
     const std::vector<fs::path> candidates = {
         exe_dir,
         installed_font_root(exe_dir),
