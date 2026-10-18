@@ -205,7 +205,12 @@ bool check_table_pagination(const fs::path& directory)
     };
     bool ok = rejected("first_row", header + body);
     ok = rejected("later_row", header + "| x |\n" + body) && ok;
-    options.page_height_pt = header_height - 0.25;
+    // Without a body, content-aware column sizing can also reduce cell padding.
+    const auto header_blocks = parse_markdown(header);
+    const auto& header_table = std::get<Table_block>(header_blocks.front());
+    const auto header_columns = compute_table_columns(header_table,
+        options.page_width_pt - options.margin_left_pt - options.margin_right_pt, style, *metrics);
+    options.page_height_pt = measure_table_row_height(header_table, 0, header_columns, style, *metrics) - 0.25;
     ok = rejected("header_only", header) && ok;
 
     auto fitting = [&](const char* name, const std::string& markdown,
