@@ -1,8 +1,4 @@
-# 3.21 is the floor because the bundled-font owner target below reads
-# $<TARGET_FILE_DIR:> of a target that depends on it. Only CMP0112, new in
-# 3.21, stops that expression from adding a reverse dependency on the named
-# target; under the older behavior the two edges close a cycle and the
-# generate step fails.
+# Font staging uses file(COPY_FILE), available since 3.21.
 cmake_minimum_required(VERSION 3.21)
 
 project(mark2haru VERSION 0.1.0 LANGUAGES C CXX)
@@ -34,57 +30,44 @@ set(MARK2HARU_BUNDLED_FONT_FILES
     CACHE INTERNAL "mark2haru bundled runtime font filenames")
 set(MARK2HARU_INSTALL_DATADIR "${CMAKE_INSTALL_DATADIR}/mark2haru")
 
-# Every executable that needs the bundled fonts at run time reads them from a
-# "fonts" directory beside itself, so one output directory is one staging
-# destination. A per-target POST_BUILD copy gives that destination as many
-# concurrent writers as there are targets, and copy_if_different is not atomic
-# against a concurrent writer: under a parallel build it intermittently fails
-# with "Error copying file (if different)". So a destination gets exactly one
-# owner target that stages it, and every consumer landing there takes a
-# dependency edge on that owner instead of copying anything itself.
-#
-# Ownership is keyed by the consumer's output directory rather than by a single
-# global anchor, because a consumer is free to build all of its font consumers
-# into one output directory or to spread them over several. Keying by
-# destination collapses the first case to one owner and gives the second case
-# one owner per directory, so neither can leave a destination unstaged or give
-# one destination two writers.
+# One owner stages all registered destinations serially: independent copy
+# commands can race when several consumers share an output directory. Resolve
+# and deduplicate the destinations at generation time, since configuration
+# properties and generator expressions can split or merge them. Building any
+# consumer stages fonts for all registered consumers in that configuration.
 function(mark2haru_stage_bundled_fonts target)
-    get_target_property(_mark2haru_output_dir ${target} RUNTIME_OUTPUT_DIRECTORY)
-    if(NOT _mark2haru_output_dir)
-        set(_mark2haru_output_dir "${CMAKE_CURRENT_BINARY_DIR}")
-    endif()
-    # The directory is used verbatim as the key: any lossy transform of it
-    # (a C identifier, say) would map two destinations differing only in
-    # punctuation onto one owner, and the loser would never be staged.
-    set(_mark2haru_owner_property
-        "MARK2HARU_BUNDLED_FONT_OWNER_${_mark2haru_output_dir}")
-
-    get_property(_mark2haru_owner GLOBAL PROPERTY "${_mark2haru_owner_property}")
-    if(NOT _mark2haru_owner)
-        set(_mark2haru_owner "mark2haru_bundled_fonts_for_${target}")
-
+    set(_mark2haru_owner mark2haru_bundled_fonts)
+    if(NOT TARGET ${_mark2haru_owner})
         set(_mark2haru_font_paths "")
         foreach(_mark2haru_font IN LISTS MARK2HARU_BUNDLED_FONT_FILES)
             list(APPEND _mark2haru_font_paths
                 "${MARK2HARU_BUNDLED_FONT_DIR}/${_mark2haru_font}")
         endforeach()
 
-        # The destination is spelled as a generator expression rather than as
-        # the key above so that a multi-config generator picks up its
-        # per-configuration subdirectory without this function knowing about it.
-        set(_mark2haru_font_dir "$<TARGET_FILE_DIR:${target}>/fonts")
+        set(_mark2haru_stage_script
+            "${CMAKE_CURRENT_BINARY_DIR}/mark2haru_bundled_fonts_$<CONFIG>.cmake")
         add_custom_target(${_mark2haru_owner}
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${_mark2haru_font_dir}"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                ${_mark2haru_font_paths} "${_mark2haru_font_dir}"
+            COMMAND ${CMAKE_COMMAND} -P "${_mark2haru_stage_script}"
             COMMENT "Staging mark2haru bundled fonts"
             VERBATIM
         )
-        set_property(GLOBAL PROPERTY "${_mark2haru_owner_property}"
-            "${_mark2haru_owner}")
+
+        # Keep the property lookup deferred so parent and sibling directories
+        # can register consumers after this function's first call.
+        set(_mark2haru_registered_destinations
+            "$<TARGET_PROPERTY:${_mark2haru_owner},MARK2HARU_FONT_DESTINATIONS>")
+        set(_mark2haru_destinations
+            "$<TARGET_GENEX_EVAL:${_mark2haru_owner},${_mark2haru_registered_destinations}>")
+        string(CONCAT _mark2haru_stage_content
+            "set(font_files [==[${_mark2haru_font_paths}]==])\n"
+            "set(font_destinations [==[$<REMOVE_DUPLICATES:${_mark2haru_destinations}>]==])\n"
+            "include([==[${CMAKE_CURRENT_FUNCTION_LIST_DIR}/cmake/stage_bundled_fonts.cmake]==])\n")
+        file(GENERATE OUTPUT "${_mark2haru_stage_script}"
+            CONTENT "${_mark2haru_stage_content}")
     endif()
 
+    set_property(TARGET ${_mark2haru_owner} APPEND PROPERTY
+        MARK2HARU_FONT_DESTINATIONS "$<TARGET_FILE_DIR:${target}>/fonts")
     add_dependencies(${target} ${_mark2haru_owner})
 endfunction()
 

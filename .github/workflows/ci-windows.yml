@@ -48,6 +48,9 @@ jobs:
       - name: Run tests
         run: ctest --test-dir build -C Release --output-on-failure
 
+      - name: Check configuration-specific font staging
+        run: python tests/test_bundled_font_staging.py --build-dir build/font-staging --parallel 2
+
       - name: Retain CLI for PDF reader validation
         uses: actions/upload-artifact@v4
         with:

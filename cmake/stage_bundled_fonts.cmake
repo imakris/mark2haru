@@ -1,0 +1,7 @@
+foreach(destination IN LISTS font_destinations)
+    file(MAKE_DIRECTORY "${destination}")
+    foreach(font IN LISTS font_files)
+        get_filename_component(filename "${font}" NAME)
+        file(COPY_FILE "${font}" "${destination}/${filename}" ONLY_IF_DIFFERENT)
+    endforeach()
+endforeach()
