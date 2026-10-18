@@ -23,6 +23,8 @@ paragraphs, or table column alignment from `:---`, `---:`, and `:---:` markers.
 
 Layout uses greedy wrapping and automatic pagination. Tables use content-aware
 column widths, split across pages, and repeat their header row.
+Rows remain indivisible. Rendering fails without saving the PDF if a header or
+a row together with its repeated header cannot fit in the page's content area.
 
 `Render_options` controls page dimensions and margins in points, body text size,
 line spacing, image paths, and fonts. See the rendering header for field names and

@@ -1,4 +1,6 @@
 #include <mark2haru/render.h>
+#include <mark2haru/markdown.h>
+#include <mark2haru/table_layout.h>
 
 #include "miniz.h"
 #include "test_common.h"
@@ -9,6 +11,7 @@
 #include <map>
 #include <regex>
 #include <string>
+#include <variant>
 
 namespace {
 
@@ -47,7 +50,7 @@ std::string content_stream(const std::string& pdf, const std::string& object_id)
 // page, and every input 'x' must still be present. This catches both clipping
 // and a pagination implementation that drops or repeats continuation lines.
 bool check_pdf(const fs::path& path, const mark2haru::Render_options& options,
-    std::size_t expected_x_count, bool code_boxes, bool multiple_pages)
+    std::size_t expected_x_count, bool code_boxes, bool multiple_pages, bool table_headers = false)
 {
     std::ifstream input(path, std::ios::binary);
     const std::string pdf{std::istreambuf_iterator<char>(input), {}};
@@ -104,7 +107,7 @@ bool check_pdf(const fs::path& path, const mark2haru::Render_options& options,
             std::cerr << path.filename() << ": unexpected empty page " << pages << '\n';
             ok = false;
         }
-        if (code_boxes) {
+        if (code_boxes || table_headers) {
             std::size_t boxes = 0;
             for (auto rect = std::sregex_iterator(stream.begin(), stream.end(), rect_re);
                  rect != std::sregex_iterator(); ++rect) {
@@ -113,12 +116,13 @@ bool check_pdf(const fs::path& path, const mark2haru::Render_options& options,
                 const double height = std::stod((*rect)[4]);
                 if (bottom < options.margin_bottom_pt - 0.01
                     || bottom + height > options.page_height_pt - options.margin_top_pt + 0.01) {
-                    std::cerr << path.filename() << ": code box outside page margins\n";
+                    std::cerr << path.filename() << ": box outside page margins\n";
                     ok = false;
                 }
             }
-            if (boxes != 2) { // fill and outline for this page's portion
-                std::cerr << path.filename() << ": missing continued code box\n";
+            // Code has a fill and outline; each table page has one header fill.
+            if (boxes != (code_boxes ? 2u : 1u)) {
+                std::cerr << path.filename() << ": unexpected page box count\n";
                 ok = false;
             }
         }
@@ -138,6 +142,87 @@ std::string repeat(const std::string& text, std::size_t count)
         result += text;
     }
     return result;
+}
+
+bool check_table_pagination(const fs::path& directory)
+{
+    using namespace mark2haru;
+    Render_options options;
+    options.font_root_dir    = directory;
+    options.page_width_pt    = 180.0;
+    options.margin_left_pt   = 12.0;
+    options.margin_right_pt  = 12.0;
+    options.margin_top_pt    = 0.0;
+    options.margin_bottom_pt = 0.0;
+    options.body_size_pt     = 10.0;
+
+    const auto metrics = mark2haru_test::load_default_metrics(directory);
+    if (!metrics) {
+        return false;
+    }
+    const std::string header = "| x |\n| --- |\n";
+    const std::string body   = "| " + repeat("x ", 60) + "|\n";
+    const auto blocks = parse_markdown(header + body);
+    const auto& table = std::get<Table_block>(blocks.front());
+    table_style_t style;
+    style.text_size_pt    = options.body_size_pt * 0.95;
+    style.text_leading_pt = style.text_size_pt * 1.22;
+    style.cell_padding_pt = options.body_size_pt * 0.35;
+    const auto columns = compute_table_columns(table,
+        options.page_width_pt - options.margin_left_pt - options.margin_right_pt, style, *metrics);
+    const double header_height   = measure_table_row_height(table, 0, columns, style, *metrics);
+    const double body_height     = measure_table_row_height(table, 1, columns, style, *metrics);
+    const double combined_height = header_height + body_height;
+
+    // Use the real font/layout measurements to place the capacity boundary.
+    // Each row fits alone; only repeating the header makes this too tall.
+    options.page_height_pt = combined_height - 0.25;
+    if (header_height >= options.page_height_pt || body_height >= options.page_height_pt) {
+        std::cerr << "table fixture must fit each row separately\n";
+        return false;
+    }
+    auto rejected = [&](const char* name, const std::string& markdown) {
+        const auto path = directory / (std::string("pagination_table_") + name + ".pdf");
+        const std::string sentinel = "preserve existing destination\n";
+        {
+            std::ofstream output(path, std::ios::binary);
+            output << sentinel;
+            output.close();
+            if (!output) {
+                std::cerr << "could not create table destination sentinel\n";
+                return false;
+            }
+        }
+        std::string error;
+        const bool rendered = render_markdown_to_pdf(markdown, path, options, error);
+        std::ifstream input(path, std::ios::binary);
+        const std::string contents{std::istreambuf_iterator<char>(input), {}};
+        if (rendered || error.find("Table") == std::string::npos || contents != sentinel) {
+            std::cerr << name << ": oversized table must fail and preserve the destination: " << error << '\n';
+            return false;
+        }
+        return true;
+    };
+    bool ok = rejected("first_row", header + body);
+    ok = rejected("later_row", header + "| x |\n" + body) && ok;
+    options.page_height_pt = header_height - 0.25;
+    ok = rejected("header_only", header) && ok;
+
+    auto fitting = [&](const char* name, const std::string& markdown,
+                       std::size_t x_count, bool multiple_pages) {
+        const auto path = directory / (std::string("pagination_table_") + name + ".pdf");
+        std::string error;
+        if (!render_markdown_to_pdf(markdown, path, options, error)) {
+            std::cerr << name << ": " << error << '\n';
+            return false;
+        }
+        return check_pdf(path, options, x_count, false, multiple_pages, true);
+    };
+    options.page_height_pt = combined_height;
+    ok = fitting("exact_fit", header + body, 61, false) && ok;
+    options.page_height_pt = combined_height + 0.25;
+    ok = fitting("continued", header + body + body, 122, true) && ok;
+    return ok;
 }
 
 } // namespace
@@ -167,6 +252,7 @@ int main(int argc, char** argv)
     ok = check("code_after_text", "intro\n\n" + code, 120, true) && ok;
     ok = check("short_paragraph", "x", 1, false, false) && ok;
     ok = check("short_code", "```\nx\n```\n", 1, true, false) && ok;
+    ok = check_table_pagination(directory) && ok;
 
     // A page too short for even one padded line must fail, not create an
     // unbounded series of empty continuation pages.

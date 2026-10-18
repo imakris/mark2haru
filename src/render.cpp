@@ -414,6 +414,21 @@ bool render_markdown_to_pdf(
 
         const std::size_t body_start = tb.has_header ? 1 : 0;
 
+        // Rows remain indivisible, and every table page repeats its header.
+        // Refuse an impossible layout before emitting it or saving the PDF.
+        if (header_height > available) {
+            error = "Table header exceeds the available page height";
+            render_ok = false;
+            return;
+        }
+        for (std::size_t row_idx = body_start; row_idx < tb.rows.size(); ++row_idx) {
+            if (header_height + row_heights[row_idx] > available) {
+                error = "Table row and repeated header exceed the available page height";
+                render_ok = false;
+                return;
+            }
+        }
+
         if (tb.has_header) {
             const double min_fit = header_height
                 + (body_start < tb.rows.size() ? row_heights[body_start] : 0.0);
@@ -429,15 +444,9 @@ bool render_markdown_to_pdf(
             const bool   fits_on_page =
                 cursor_y + row_height <= options.page_height_pt - options.margin_bottom_pt;
             if (!fits_on_page) {
-                // If the row is taller than a full page there's nothing
-                // better we can do than draw it where it lands; otherwise
-                // start a fresh page and repeat the header.
-                const bool row_exceeds_page = row_height > available;
-                if (!row_exceeds_page) {
-                    new_page();
-                    if (tb.has_header) {
-                        draw_row(0);
-                    }
+                new_page();
+                if (tb.has_header) {
+                    draw_row(0);
                 }
             }
             draw_row(row_idx);
