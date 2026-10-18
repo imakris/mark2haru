@@ -6,6 +6,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <map>
 #include <regex>
 #include <string>
 
@@ -46,14 +47,32 @@ std::string content_stream(const std::string& pdf, const std::string& object_id)
 // page, and every input 'x' must still be present. This catches both clipping
 // and a pagination implementation that drops or repeats continuation lines.
 bool check_pdf(const fs::path& path, const mark2haru::Render_options& options,
-    unsigned x_glyph, std::size_t expected_x_count, bool code_boxes, bool multiple_pages)
+    std::size_t expected_x_count, bool code_boxes, bool multiple_pages)
 {
     std::ifstream input(path, std::ios::binary);
     const std::string pdf{std::istreambuf_iterator<char>(input), {}};
     const std::regex page_re(R"(/Contents ([0-9]+) 0 R)");
     const std::regex text_re(
-        R"(/F[0-9]+ ([0-9.]+) Tf\n(-?[0-9.]+) (-?[0-9.]+) Td\n<([0-9a-fA-F]*)> Tj)");
+        R"((/F[0-9]+) ([0-9.]+) Tf\n(-?[0-9.]+) (-?[0-9.]+) Td\n<([0-9a-fA-F]*)> Tj)");
     const std::regex rect_re(R"((-?[0-9.]+) (-?[0-9.]+) ([0-9.]+) ([0-9.]+) re)");
+    const std::regex font_re(R"((/F[0-9]+) ([0-9]+) 0 R)");
+    const std::regex unicode_re(R"(/ToUnicode ([0-9]+) 0 R)");
+    const std::regex x_re(R"(<([0-9A-Fa-f]{4})> <0078>)");
+    std::map<std::string, unsigned> x_cids;
+    for (auto font = std::sregex_iterator(pdf.begin(), pdf.end(), font_re);
+         font != std::sregex_iterator(); ++font)
+    {
+        const auto object = pdf.find("\n" + (*font)[2].str() + " 0 obj\n");
+        const auto body   = pdf.substr(object, pdf.find("\nendobj", object) - object);
+        std::smatch unicode_match;
+        std::smatch x_match;
+        if (std::regex_search(body, unicode_match, unicode_re)) {
+            const auto cmap = content_stream(pdf, unicode_match[1].str());
+            if (std::regex_search(cmap, x_match, x_re)) {
+                x_cids[(*font)[1].str()] = static_cast<unsigned>(std::stoul(x_match[1], nullptr, 16));
+            }
+        }
+    }
     std::size_t pages = 0;
     std::size_t x_count = 0;
     bool ok = true;
@@ -65,17 +84,18 @@ bool check_pdf(const fs::path& path, const mark2haru::Render_options& options,
         for (auto text = std::sregex_iterator(stream.begin(), stream.end(), text_re);
              text != std::sregex_iterator(); ++text) {
             ++text_count;
-            const double size = std::stod((*text)[1]);
-            const double baseline = std::stod((*text)[3]);
+            const double size = std::stod((*text)[2]);
+            const double baseline = std::stod((*text)[4]);
             const double top = options.page_height_pt - baseline - size;
             if (top < options.margin_top_pt - 0.01
                 || baseline < options.margin_bottom_pt - 0.01) {
                 std::cerr << path.filename() << ": text outside page margins on page " << pages << '\n';
                 ok = false;
             }
-            const auto glyphs = (*text)[4].str();
-            for (std::size_t i = 0; i + 4 <= glyphs.size(); i += 4) {
-                if (std::stoul(glyphs.substr(i, 4), nullptr, 16) == x_glyph) {
+            const auto cids  = (*text)[5].str();
+            const auto font = x_cids.find((*text)[1].str());
+            for (std::size_t i = 0; font != x_cids.end() && i + 4 <= cids.size(); i += 4) {
+                if (std::stoul(cids.substr(i, 4), nullptr, 16) == font->second) {
                     ++x_count;
                 }
             }
@@ -125,10 +145,6 @@ std::string repeat(const std::string& text, std::size_t count)
 int main(int argc, char** argv)
 {
     const fs::path directory = mark2haru_test::executable_dir(argc, argv);
-    const auto metrics = mark2haru_test::load_default_metrics(directory);
-    if (!metrics) {
-        return 1;
-    }
     mark2haru::Render_options options;
     options.font_root_dir = directory;
     auto check = [&](const std::string& name, const std::string& markdown,
@@ -139,9 +155,7 @@ int main(int argc, char** argv)
             std::cerr << name << ": " << error << '\n';
             return false;
         }
-        const auto font = code ? mark2haru::Pdf_font::MONO : mark2haru::Pdf_font::REGULAR;
-        return check_pdf(path, options, metrics->font_face(font).glyph_for_codepoint('x'),
-            x_count, code, multiple_pages);
+        return check_pdf(path, options, x_count, code, multiple_pages);
     };
     bool ok = true;
     ok = check("paragraph", repeat("xxxx ", 1400), 5600) && ok;

@@ -46,6 +46,10 @@ Coverage depends on the selected face. A code point with no glyph falls back to
 cannot be resolved or loaded, rendering fails; the overload accepting an error
 string reports the reason.
 
+Each font variant can encode up to 65,535 distinct supported characters in one
+PDF. Repeated characters and missing-glyph substitutions reuse their character
+codes. Exceeding this limit makes saving fail before the output file is opened.
+
 Set `Render_options::font_root_dir` to the directory containing your fonts or its
 parent. For another family, use the explicit face paths in `font_family`, defined
 in [font_config.h](../include/mark2haru/font_config.h), or replace the bundled files

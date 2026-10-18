@@ -4,11 +4,11 @@
 #include <mark2haru/png_image.h>
 
 #include <array>
+#include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <string>
 #include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
 namespace mark2haru
@@ -100,8 +100,15 @@ private:
 
     struct Loaded_font
     {
-        std::unordered_map<std::uint16_t, std::uint32_t>   gid_to_unicode;
-        std::unordered_set<std::uint16_t>                  used_glyphs;
+        struct character_t
+        {
+            std::uint32_t unicode;
+            std::uint16_t gid;
+        };
+
+        std::unordered_map<std::uint32_t, std::uint16_t> unicode_to_cid;
+        std::vector<character_t>                       characters;
+        bool                                           encoding_failed = false;
     };
 
     struct Loaded_image

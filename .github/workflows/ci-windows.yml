@@ -48,6 +48,14 @@ jobs:
       - name: Run tests
         run: ctest --test-dir build -C Release --output-on-failure
 
+      - name: Retain CLI for PDF reader validation
+        uses: actions/upload-artifact@v4
+        with:
+          name: mark2haru-windows
+          path: build/mark2haru.exe
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Install and test downstream consumer
         shell: bash
         run: .github/scripts/consumer_smoke.sh build

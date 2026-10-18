@@ -11,6 +11,7 @@
 #include <cmath>
 #include <fstream>
 #include <iomanip>
+#include <limits>
 #include <locale>
 #include <ostream>
 #include <sstream>
@@ -90,14 +91,14 @@ std::string utf16be_hex_from_codepoint(std::uint32_t codepoint)
     return out;
 }
 
-std::string pdf_hex_string(const std::vector<std::uint16_t>& gids)
+std::string pdf_hex_string(const std::vector<std::uint16_t>& cids)
 {
     std::string out;
-    out.reserve(gids.size() * 4 + 2);
+    out.reserve(cids.size() * 4 + 2);
     out.push_back('<');
-    for (std::uint16_t gid : gids) {
-        out += hex_byte(static_cast<std::uint8_t>((gid >> 8) & 0xFF));
-        out += hex_byte(static_cast<std::uint8_t>(gid & 0xFF));
+    for (std::uint16_t cid : cids) {
+        out += hex_byte(static_cast<std::uint8_t>((cid >> 8) & 0xFF));
+        out += hex_byte(static_cast<std::uint8_t>(cid & 0xFF));
     }
     out.push_back('>');
     return out;
@@ -109,13 +110,6 @@ double scale_1000(std::int16_t value, std::uint16_t units_per_em)
         return static_cast<double>(value);
     }
     return static_cast<double>(value) * 1000.0 / static_cast<double>(units_per_em);
-}
-
-std::vector<std::uint16_t> sorted_used_glyphs(const std::unordered_set<std::uint16_t>& set)
-{
-    std::vector<std::uint16_t> out(set.begin(), set.end());
-    std::sort(out.begin(), out.end());
-    return out;
 }
 
 } // namespace
@@ -180,7 +174,7 @@ std::vector<Pdf_font> Pdf_writer::used_fonts(
 {
     std::vector<Pdf_font> out;
     for (std::size_t i = 0; i < fonts.size(); ++i) {
-        if (!fonts[i].used_glyphs.empty()) {
+        if (!fonts[i].characters.empty()) {
             out.push_back(static_cast<Pdf_font>(i));
         }
     }
@@ -322,8 +316,8 @@ std::string Pdf_writer::utf8_to_hex_cid_string(
     Loaded_font&           loaded,
     const std::string&     text)
 {
-    std::vector<std::uint16_t> gids;
-    gids.reserve(text.size());
+    std::vector<std::uint16_t> cids;
+    cids.reserve(text.size());
     for (std::uint32_t cp : utf8::decode(text)) {
         std::uint16_t gid         = font.glyph_for_codepoint(cp);
         std::uint32_t recorded_cp = cp;
@@ -334,14 +328,30 @@ std::string Pdf_writer::utf8_to_hex_cid_string(
                 recorded_cp = '?';
             }
         }
-        gids.push_back(gid);
-        if (gid != 0) {
-            loaded.gid_to_unicode.emplace(gid, recorded_cp);
-            loaded.used_glyphs.insert(gid);
+        if (gid == 0) {
+            cids.push_back(0);
+            continue;
         }
+
+        const auto found = loaded.unicode_to_cid.find(recorded_cp);
+        if (found != loaded.unicode_to_cid.end()) {
+            cids.push_back(found->second);
+            continue;
+        }
+        if (loaded.characters.size() == std::numeric_limits<std::uint16_t>::max()) {
+            loaded.encoding_failed = true;
+            return "<>";
+        }
+
+        // Distinct characters may share a glyph; their CIDs must still select
+        // distinct ToUnicode entries. CID zero remains the .notdef glyph.
+        const auto cid = static_cast<std::uint16_t>(loaded.characters.size() + 1);
+        loaded.unicode_to_cid.emplace(recorded_cp, cid);
+        loaded.characters.push_back({ recorded_cp, gid });
+        cids.push_back(cid);
     }
 
-    return pdf_hex_string(gids);
+    return pdf_hex_string(cids);
 }
 
 void Pdf_writer::draw_text(
@@ -438,25 +448,15 @@ std::string Pdf_writer::make_to_unicode_cmap(const Loaded_font& font)
         << "<0000> <FFFF>\n"
         << "endcodespacerange\n";
 
-    std::vector<std::pair<std::uint16_t, std::uint32_t>> pairs;
-    pairs.reserve(font.gid_to_unicode.size());
-    for (const auto& kv : font.gid_to_unicode) {
-        pairs.push_back(kv);
-    }
-    std::sort(
-        pairs.begin(),
-        pairs.end(),
-        [](const auto& a, const auto& b) { return a.first < b.first; });
-
     const std::size_t chunk = 64;
-    for (std::size_t i = 0; i < pairs.size(); i += chunk) {
-        const std::size_t count = std::min(chunk, pairs.size() - i);
+    for (std::size_t i = 0; i < font.characters.size(); i += chunk) {
+        const std::size_t count = std::min(chunk, font.characters.size() - i);
         cmap << count << " beginbfchar\n";
         for (std::size_t j = 0; j < count; ++j) {
-            const auto& [gid, cp] = pairs[i + j];
-            cmap << '<' << hex_byte(static_cast<std::uint8_t>((gid >> 8) & 0xFF))
-                << hex_byte(static_cast<std::uint8_t>(gid & 0xFF)) << "> <"
-                << utf16be_hex_from_codepoint(cp) << ">\n";
+            const std::size_t cid = i + j + 1;
+            cmap << '<' << hex_byte(static_cast<std::uint8_t>((cid >> 8) & 0xFF))
+                << hex_byte(static_cast<std::uint8_t>(cid & 0xFF)) << "> <"
+                << utf16be_hex_from_codepoint(font.characters[i + j].unicode) << ">\n";
         }
         cmap << "endbfchar\n";
     }
@@ -524,6 +524,11 @@ bool Pdf_writer::save(const fs::path& path) const
     if (!m_fonts_loaded || !m_metrics) {
         return false;
     }
+    for (const auto& font : m_fonts) {
+        if (font.encoding_failed) {
+            return false;
+        }
+    }
 
     Pdf_object_table table;
 
@@ -539,6 +544,7 @@ bool Pdf_writer::save(const fs::path& path) const
         int    descriptor = 0;
         int    cid        = 0;
         int    to_unicode = 0;
+        int    cid_to_gid = 0;
     };
     std::vector<font_object_ids_t> font_objects(used_font_ids.size());
     for (auto& f : font_objects) {
@@ -547,6 +553,7 @@ bool Pdf_writer::save(const fs::path& path) const
         f.descriptor = table.reserve();
         f.cid        = table.reserve();
         f.to_unicode = table.reserve();
+        f.cid_to_gid = table.reserve();
     }
 
     struct image_object_ids_t
@@ -636,25 +643,26 @@ bool Pdf_writer::save(const fs::path& path) const
         std::ostringstream widths;
         widths.imbue(std::locale::classic());
         widths << "[ ";
-        std::vector<std::uint16_t> used = sorted_used_glyphs(slot.used_glyphs);
-        if (used.empty()) {
-            used.push_back(0);
-        }
-        for (std::uint16_t gid : used) {
+        std::string cid_to_gid(2, '\0');
+        for (std::size_t i = 0; i < slot.characters.size(); ++i) {
+            const std::uint16_t gid = slot.characters[i].gid;
             const std::uint16_t aw = face.advance_width_for_gid(gid);
             const std::uint32_t w1000 = face.units_per_em() == 0
                 ? aw
                 : static_cast<std::uint32_t>((static_cast<std::uint64_t>(aw) * 1000 + face.units_per_em() / 2)
                     / face.units_per_em());
-            widths << gid << " [" << w1000 << "] ";
+            widths << i + 1 << " [" << w1000 << "] ";
+            cid_to_gid.push_back(static_cast<char>((gid >> 8) & 0xFF));
+            cid_to_gid.push_back(static_cast<char>(gid & 0xFF));
         }
         widths << "]";
+        table.emit(ids.cid_to_gid, build_stream_object(cid_to_gid));
 
         std::ostringstream cidfont;
         cidfont.imbue(std::locale::classic());
         cidfont << "<< /Type /Font /Subtype /CIDFontType2 /BaseFont /" << m_metrics->font_tag_name(font_id)
             << " /FontDescriptor " << ids.descriptor << " 0 R /CIDSystemInfo << /Registry (Adobe)"
-            << " /Ordering (Identity) /Supplement 0 >> /CIDToGIDMap /Identity /DW "
+            << " /Ordering (Identity) /Supplement 0 >> /CIDToGIDMap " << ids.cid_to_gid << " 0 R /DW "
             << number_to_string(default_width_1000) << " /W " << widths.str() << " >>";
         table.emit(ids.cid, cidfont.str());
 
